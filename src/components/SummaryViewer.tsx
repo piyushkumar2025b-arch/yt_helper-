@@ -53,11 +53,16 @@ interface SummaryViewerProps {
   onToggleFullscreen?: () => void;
   isOptionsOpen?: boolean;
   onToggleOptions?: () => void;
+  activeTimestamp?: number | null;
+  onSyncTimestamp?: (seconds: number) => void;
 }
 
-// Helper to strip any emojis or pictographs from text for a strictly formal presentation
+// Helper to strip any emojis or pictographs from text and ensure all [MM:SS] timestamps are bolded so they render as interactive seek buttons
 function stripEmojis(text: string): string {
-  return text.replace(/[\p{Emoji_Presentation}\p{Extended_Pictographic}]/gu, '').replace(/#[ \t]+/g, (m) => m);
+  return text
+    .replace(/[\p{Emoji_Presentation}\p{Extended_Pictographic}]/gu, '')
+    .replace(/#[ \t]+/g, (m) => m)
+    .replace(/(?<!\*)\[(\d{1,2}:\d{2}(?::\d{2})?)\](?!\*|\()/g, '**[$1]**');
 }
 
 interface GranularMarkdownBlock {
@@ -274,6 +279,8 @@ export const SummaryViewer: React.FC<SummaryViewerProps> = ({
   onToggleFullscreen,
   isOptionsOpen = true,
   onToggleOptions,
+  activeTimestamp = null,
+  onSyncTimestamp,
 }) => {
   const [copied, setCopied] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
@@ -524,6 +531,7 @@ export const SummaryViewer: React.FC<SummaryViewerProps> = ({
         const timestampMatch = text.match(/\[(\d{1,2}:\d{2}(?::\d{2})?)\]/);
         if (timestampMatch) {
           const seconds = parseTimestampToSeconds(timestampMatch[0]);
+          const isSyncedTime = activeTimestamp !== null && Math.abs(activeTimestamp - seconds) < 8;
           return (
             <button
               type="button"
@@ -531,10 +539,14 @@ export const SummaryViewer: React.FC<SummaryViewerProps> = ({
                 e.stopPropagation();
                 onSeekToTimestamp(seconds);
               }}
-              className="inline-flex items-center gap-1 font-mono text-xs font-semibold text-indigo-400 hover:underline cursor-pointer mr-1.5 align-baseline tabular-nums"
-              title={`Jump to ${timestampMatch[1]}`}
+              className={`inline-flex items-center gap-1 font-mono text-xs font-semibold cursor-pointer mr-1.5 align-baseline tabular-nums transition-colors ${
+                isSyncedTime
+                  ? 'bg-indigo-600 text-white px-1.5 py-0.5 rounded shadow-sm'
+                  : 'text-indigo-400 hover:underline'
+              }`}
+              title={`Jump video to ${timestampMatch[1]}`}
             >
-              <Clock className="w-3 h-3 opacity-60" />
+              <Clock className="w-3 h-3 opacity-75" />
               <span>{text}</span>
             </button>
           );
@@ -616,8 +628,18 @@ export const SummaryViewer: React.FC<SummaryViewerProps> = ({
         </a>
       ),
     }),
-    [themeConfig.borderLight, onSeekToTimestamp]
+    [themeConfig.borderLight, onSeekToTimestamp, activeTimestamp]
   );
+
+  // Sync activeTimestamp when audio narration steps into a summary block with a timestamp badge
+  useEffect(() => {
+    if ((isSpeaking || isPaused) && speakingIndex >= 0 && onSyncTimestamp) {
+      const matchingBlock = parsedBlocks.find((b) => b.speechIdx === speakingIndex);
+      if (matchingBlock?.timestampBadge) {
+        onSyncTimestamp(parseTimestampToSeconds(matchingBlock.timestampBadge));
+      }
+    }
+  }, [speakingIndex, isSpeaking, isPaused, parsedBlocks, onSyncTimestamp]);
 
   /**
    * Renders the active block's words directly inline inside its semantic element (h1, h2, h3, li, blockquote, p)

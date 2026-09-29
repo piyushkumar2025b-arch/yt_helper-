@@ -36,6 +36,8 @@ export const VIDEO_SIZE_PRESETS: Record<
 interface VideoPlayerPanelProps {
   metadata: VideoMetadata | null;
   activeTimestamp: number | null;
+  seekTrigger?: number;
+  onTimeUpdate?: (seconds: number) => void;
   currentTheme?: ThemeId;
   size?: VideoPlayerSize;
   onChangeSize?: (size: VideoPlayerSize) => void;
@@ -48,6 +50,8 @@ interface VideoPlayerPanelProps {
 export const VideoPlayerPanel: React.FC<VideoPlayerPanelProps> = ({
   metadata,
   activeTimestamp,
+  seekTrigger = 0,
+  onTimeUpdate,
   currentTheme = 'midnight',
   size = 'md',
   onChangeSize,
@@ -58,6 +62,8 @@ export const VideoPlayerPanel: React.FC<VideoPlayerPanelProps> = ({
 }) => {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const isPlayerReadyRef = useRef<boolean>(false);
+  const lastReportedSecRef = useRef<number>(-1);
   const themeConfig = APP_THEMES[currentTheme] || APP_THEMES.midnight;
 
   // Custom width when user drags the resize handle or picks a size preset
@@ -87,13 +93,77 @@ export const VideoPlayerPanel: React.FC<VideoPlayerPanelProps> = ({
     }
   }, [size]);
 
-  // Seek YouTube iframe when activeTimestamp changes
+  // Reset player ready state when videoId changes
   useEffect(() => {
-    if (activeTimestamp !== null && iframeRef.current && metadata?.videoId) {
-      const sec = Math.floor(activeTimestamp);
-      iframeRef.current.src = `https://www.youtube.com/embed/${metadata.videoId}?autoplay=1&start=${sec}&rel=0`;
+    isPlayerReadyRef.current = false;
+    lastReportedSecRef.current = -1;
+  }, [metadata?.videoId]);
+
+  // Listen to YouTube IFrame API postMessage events for live playback time synchronization
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      if (!event.origin.includes('youtube.com')) return;
+      try {
+        const data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
+        if (!data) return;
+        if (data.event === 'onReady' || data.event === 'initialDelivery' || data.event === 'infoDelivery') {
+          isPlayerReadyRef.current = true;
+        }
+        if (data.event === 'infoDelivery' && data.info && typeof data.info.currentTime === 'number') {
+          const sec = Math.floor(data.info.currentTime);
+          if (sec !== lastReportedSecRef.current) {
+            lastReportedSecRef.current = sec;
+            onTimeUpdate?.(sec);
+          }
+        }
+      } catch {
+        // Ignore non-JSON messages
+      }
+    };
+
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, [onTimeUpdate]);
+
+  const registerYouTubeListener = () => {
+    if (!iframeRef.current?.contentWindow) return;
+    try {
+      iframeRef.current.contentWindow.postMessage(
+        JSON.stringify({ event: 'listening', id: 'opentranscript-yt' }),
+        '*'
+      );
+      iframeRef.current.contentWindow.postMessage(
+        JSON.stringify({ event: 'command', func: 'addEventListener', args: ['onStateChange'] }),
+        '*'
+      );
+    } catch {
+      // ignore
     }
-  }, [activeTimestamp, metadata?.videoId]);
+  };
+
+  // Seek YouTube iframe when user explicitly clicks a timestamp (seekTrigger increments)
+  useEffect(() => {
+    if (seekTrigger > 0 && activeTimestamp !== null && iframeRef.current && metadata?.videoId) {
+      const sec = Math.max(0, Math.floor(activeTimestamp));
+      lastReportedSecRef.current = sec;
+      if (isPlayerReadyRef.current && iframeRef.current.contentWindow) {
+        try {
+          iframeRef.current.contentWindow.postMessage(
+            JSON.stringify({ event: 'command', func: 'seekTo', args: [sec, true] }),
+            '*'
+          );
+          iframeRef.current.contentWindow.postMessage(
+            JSON.stringify({ event: 'command', func: 'playVideo', args: [] }),
+            '*'
+          );
+          return;
+        } catch {
+          // fallback to src update
+        }
+      }
+      iframeRef.current.src = `https://www.youtube.com/embed/${metadata.videoId}?enablejsapi=1&autoplay=1&start=${sec}&rel=0`;
+    }
+  }, [seekTrigger, metadata?.videoId]);
 
   const snapToCorner = (targetCorner: FloatingCorner, widthToUse = customWidth) => {
     if (typeof window === 'undefined') return;
@@ -174,15 +244,31 @@ export const VideoPlayerPanel: React.FC<VideoPlayerPanelProps> = ({
     return null;
   }
 
-  const startTimeParam = activeTimestamp !== null ? `&start=${Math.floor(activeTimestamp)}&autoplay=1` : '';
-  const embedSrc = `https://www.youtube.com/embed/${metadata.videoId}?rel=0${startTimeParam}`;
+  const formatSec = (s: number) => {
+    const hrs = Math.floor(s / 3600);
+    const mins = Math.floor((s % 3600) / 60);
+    const secs = Math.floor(s % 60);
+    if (hrs > 0) {
+      return `${hrs}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    }
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const embedSrc = `https://www.youtube.com/embed/${metadata.videoId}?enablejsapi=1&rel=0`;
 
   // 1. Embedded inside Sidebar Mode
   if (embeddedInSidebar) {
     return (
       <div className={`rounded-lg overflow-hidden border ${themeConfig.borderLight} bg-black/90 space-y-1.5 p-1.5`}>
         <div className="flex items-center justify-between px-1 text-[11px]">
-          <span className={`font-medium truncate ${themeConfig.textSecondary}`}>Sidebar Player</span>
+          <div className="flex items-center gap-1.5 truncate">
+            <span className={`font-medium truncate ${themeConfig.textSecondary}`}>Sidebar Player</span>
+            {activeTimestamp !== null && (
+              <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-400 tabular-nums shrink-0">
+                {formatSec(activeTimestamp)}
+              </span>
+            )}
+          </div>
           <div className="flex items-center gap-1">
             {onChangePlacement && (
               <>
@@ -220,6 +306,7 @@ export const VideoPlayerPanel: React.FC<VideoPlayerPanelProps> = ({
           <iframe
             ref={iframeRef}
             src={embedSrc}
+            onLoad={registerYouTubeListener}
             title={metadata.title || 'Video Player'}
             className="w-full h-full border-0"
             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
@@ -238,12 +325,17 @@ export const VideoPlayerPanel: React.FC<VideoPlayerPanelProps> = ({
         className={`rounded-xl overflow-hidden border ${themeConfig.borderLight} ${themeConfig.cardBg} shadow-lg transition-all`}
       >
         {/* Top Control Bar */}
-        <div className={`px-3 py-2 border-b ${themeConfig.borderLight} flex items-center justify-between gap-2 flex-wrap text-xs`}>
+        <div className={`px-3 py-1.5 border-b ${themeConfig.borderLight} flex items-center justify-between gap-2 flex-wrap text-xs`}>
           <div className="flex items-center gap-2 min-w-0">
             <Tv className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
             <span className={`font-semibold truncate ${themeConfig.textPrimary}`}>
               {metadata.title}
             </span>
+            {activeTimestamp !== null && (
+              <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-400 tabular-nums shrink-0">
+                Synced: {formatSec(activeTimestamp)}
+              </span>
+            )}
           </div>
 
           <div className="flex items-center gap-1.5 flex-wrap">
@@ -311,6 +403,7 @@ export const VideoPlayerPanel: React.FC<VideoPlayerPanelProps> = ({
           <iframe
             ref={iframeRef}
             src={embedSrc}
+            onLoad={registerYouTubeListener}
             title={metadata.title || 'Video Player'}
             className="w-full h-full border-0"
             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
@@ -351,6 +444,11 @@ export const VideoPlayerPanel: React.FC<VideoPlayerPanelProps> = ({
           <span className="text-[11px] font-semibold truncate">
             {metadata.title || 'Video Player'}
           </span>
+          {activeTimestamp !== null && (
+            <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-400 tabular-nums shrink-0">
+              {formatSec(activeTimestamp)}
+            </span>
+          )}
         </div>
 
         {/* Controls: 4 Sizes (S / M / L / XL), 4 Quick Corner Snaps, Dock Options, Close */}
@@ -461,6 +559,7 @@ export const VideoPlayerPanel: React.FC<VideoPlayerPanelProps> = ({
         <iframe
           ref={iframeRef}
           src={embedSrc}
+          onLoad={registerYouTubeListener}
           title={metadata.title || 'Video Player'}
           className="w-full h-full border-0"
           allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"

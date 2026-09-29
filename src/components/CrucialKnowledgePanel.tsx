@@ -16,6 +16,7 @@ import {
   Globe,
   Layers,
   Bookmark,
+  Clock,
 } from 'lucide-react';
 import {
   CrucialTermItem,
@@ -43,6 +44,8 @@ interface CrucialKnowledgePanelProps {
     content?: string;
     notes?: string;
   }) => void;
+  onSeekToTimestamp?: (seconds: number) => void;
+  activeTimestamp?: number | null;
 }
 
 export const CrucialKnowledgePanel: React.FC<CrucialKnowledgePanelProps> = ({
@@ -53,8 +56,34 @@ export const CrucialKnowledgePanel: React.FC<CrucialKnowledgePanelProps> = ({
   onAppendToSummary,
   onExploreTerm,
   onSaveToList,
+  onSeekToTimestamp,
+  activeTimestamp = null,
 }) => {
   const themeConfig = APP_THEMES[currentTheme] || APP_THEMES.midnight;
+
+  const findSegmentMatchForText = (queries: string[]): { seconds: number; label: string } | null => {
+    for (const q of queries) {
+      if (!q) continue;
+      const explicitTs = q.match(/\[(\d{1,2}:\d{2}(?::\d{2})?)\]/);
+      if (explicitTs) {
+        const parts = explicitTs[1].split(':').map(Number);
+        const sec = parts.length === 3 ? parts[0] * 3600 + parts[1] * 60 + parts[2] : parts[0] * 60 + parts[1];
+        return { seconds: sec, label: explicitTs[1] };
+      }
+    }
+    if (!transcriptSegments || transcriptSegments.length === 0) return null;
+    for (const q of queries) {
+      const cleaned = q.replace(/[^a-zA-Z0-9\s]/g, '').trim().toLowerCase();
+      if (cleaned.length < 3) continue;
+      const words = cleaned.split(/\s+/).filter((w) => w.length > 3);
+      const searchSnippet = words.slice(0, 3).join(' ') || cleaned;
+      const found = transcriptSegments.find((s) => s.text.toLowerCase().includes(searchSnippet));
+      if (found) {
+        return { seconds: found.start, label: found.formattedTime };
+      }
+    }
+    return null;
+  };
 
   const [viewMode, setViewMode] = useState<'list' | 'flashcards' | 'dictionary'>('list');
   const [filterType, setFilterType] = useState<'all' | 'takeaways' | 'acronyms' | 'concepts'>('all');
@@ -702,16 +731,38 @@ export const CrucialKnowledgePanel: React.FC<CrucialKnowledgePanelProps> = ({
               <div className={`divide-y ${themeConfig.borderLight}`}>
                 {filteredTakeaways.map((item) => {
                   const isSpeaking = speakingItem === item.id;
+                  const tsMatch = findSegmentMatchForText([
+                    item.quote || '',
+                    item.description,
+                    item.principle,
+                  ]);
+                  const isSyncedTime =
+                    tsMatch && activeTimestamp !== null && Math.abs(activeTimestamp - tsMatch.seconds) < 10;
                   return (
                     <div
                       key={item.id}
-                      className="py-6 first:pt-0 last:pb-0 flex flex-col lg:flex-row lg:items-start justify-between gap-6"
+                      className="py-5 first:pt-0 last:pb-0 flex flex-col lg:flex-row lg:items-start justify-between gap-4"
                     >
-                      <div className="space-y-2.5 max-w-4xl">
+                      <div className="space-y-2 max-w-4xl">
                         <div className="flex items-center gap-2.5 flex-wrap">
                           <h4 className={`text-base font-bold ${themeConfig.textPrimary}`}>
                             {item.principle}
                           </h4>
+                          {tsMatch && onSeekToTimestamp && (
+                            <button
+                              type="button"
+                              onClick={() => onSeekToTimestamp(tsMatch.seconds)}
+                              className={`inline-flex items-center gap-1 font-mono text-xs font-semibold px-2 py-0.5 rounded cursor-pointer tabular-nums transition-colors ${
+                                isSyncedTime
+                                  ? 'bg-indigo-600 text-white shadow-sm'
+                                  : 'bg-indigo-500/10 text-indigo-400 hover:bg-indigo-500/20'
+                              }`}
+                              title={`Jump video to [${tsMatch.label}]`}
+                            >
+                              <Clock className="w-3 h-3" />
+                              <span>[{tsMatch.label}]</span>
+                            </button>
+                          )}
                           <span className={`text-xs ${themeConfig.textMuted}`}>
                             · {item.category.replace('_', ' ')}
                           </span>
@@ -794,10 +845,17 @@ export const CrucialKnowledgePanel: React.FC<CrucialKnowledgePanelProps> = ({
               <div className={`divide-y ${themeConfig.borderLight}`}>
                 {filteredTerms.map((termItem, idx) => {
                   const isSpeaking = speakingItem === `term-${idx}`;
+                  const tsMatch = findSegmentMatchForText([
+                    termItem.contextInVideo || '',
+                    termItem.term,
+                    termItem.fullForm || '',
+                  ]);
+                  const isSyncedTime =
+                    tsMatch && activeTimestamp !== null && Math.abs(activeTimestamp - tsMatch.seconds) < 10;
                   return (
                     <div
                       key={idx}
-                      className="py-5 first:pt-0 last:pb-0 flex flex-col lg:flex-row lg:items-start justify-between gap-6"
+                      className="py-4 first:pt-0 last:pb-0 flex flex-col lg:flex-row lg:items-start justify-between gap-4"
                     >
                       <div className="space-y-1.5 max-w-4xl">
                         <div className="flex items-baseline gap-2.5 flex-wrap">
@@ -808,6 +866,21 @@ export const CrucialKnowledgePanel: React.FC<CrucialKnowledgePanelProps> = ({
                             <span className={`text-sm font-semibold ${themeConfig.textPrimary}`}>
                               — {termItem.fullForm}
                             </span>
+                          )}
+                          {tsMatch && onSeekToTimestamp && (
+                            <button
+                              type="button"
+                              onClick={() => onSeekToTimestamp(tsMatch.seconds)}
+                              className={`inline-flex items-center gap-1 font-mono text-xs font-semibold px-2 py-0.5 rounded cursor-pointer tabular-nums transition-colors ${
+                                isSyncedTime
+                                  ? 'bg-indigo-600 text-white shadow-sm'
+                                  : 'bg-indigo-500/10 text-indigo-400 hover:bg-indigo-500/20'
+                              }`}
+                              title={`Jump video to [${tsMatch.label}]`}
+                            >
+                              <Clock className="w-3 h-3" />
+                              <span>[{tsMatch.label}]</span>
+                            </button>
                           )}
                           <span className={`text-xs ${themeConfig.textMuted}`}>
                             · {termItem.tag || termItem.category}

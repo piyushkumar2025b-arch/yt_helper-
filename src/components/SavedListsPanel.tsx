@@ -48,7 +48,8 @@ interface SavedListsPanelProps {
   currentVideoMetadata: VideoMetadata | null;
   currentVideoUrl: string;
   currentSummaryMarkdown: string;
-  onLoadSavedVideo: (url: string) => void;
+  onLoadSavedVideo: (url: string, savedMarkdown?: string, savedTitle?: string) => void;
+  onAppendToSummary?: (markdownText: string) => void;
   user: User | null;
 }
 
@@ -74,6 +75,7 @@ export const SavedListsPanel: React.FC<SavedListsPanelProps> = ({
   currentVideoUrl,
   currentSummaryMarkdown,
   onLoadSavedVideo,
+  onAppendToSummary,
   user,
 }) => {
   const themeConfig = APP_THEMES[currentTheme] || APP_THEMES.midnight;
@@ -801,11 +803,34 @@ export const SavedListsPanel: React.FC<SavedListsPanelProps> = ({
                         {isYouTubeItem && item.url && (
                           <button
                             type="button"
-                            onClick={() => onLoadSavedVideo(item.url)}
+                            onClick={() =>
+                              onLoadSavedVideo(
+                                item.url,
+                                item.itemType === 'summary' ? item.content : undefined,
+                                item.title
+                              )
+                            }
                             className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold ${themeConfig.primaryButton} cursor-pointer transition-colors`}
                           >
                             <Play className="w-3 h-3" />
-                            <span>Load Video</span>
+                            <span>{item.itemType === 'summary' ? 'Load Video & Summary' : 'Load Video'}</span>
+                          </button>
+                        )}
+
+                        {onAppendToSummary && item.itemType !== 'summary' && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              onAppendToSummary(
+                                `\n\n### ${item.title}${item.subtitle ? ` — *${item.subtitle}*` : ''}\n${
+                                  item.content ? `${item.content}\n` : ''
+                                }${item.notes ? `> *Note:* ${item.notes}\n` : ''}`
+                              )
+                            }
+                            className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-medium ${themeConfig.textSecondary} hover:${themeConfig.textPrimary} bg-slate-500/10 cursor-pointer`}
+                          >
+                            <Plus className="w-3.5 h-3.5 text-indigo-400" />
+                            <span>Add to Summary</span>
                           </button>
                         )}
 

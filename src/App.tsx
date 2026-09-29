@@ -68,6 +68,7 @@ export default function App() {
   const [fullText, setFullText] = useState<string>('');
   const [summary, setSummary] = useState<SummaryResult | null>(null);
   const [activeTimestamp, setActiveTimestamp] = useState<number | null>(null);
+  const [seekTrigger, setSeekTrigger] = useState<number>(0);
   const [activeTab, setActiveTab] = useState<'summary' | 'transcript' | 'knowledge' | 'research' | 'scrape' | 'chat' | 'lists'>('summary');
   const [showVideo, setShowVideo] = useState<boolean>(false);
   const [videoSize, setVideoSize] = useState<VideoPlayerSize>(() => {
@@ -306,8 +307,10 @@ export default function App() {
     }
   };
 
-  // Main Action: Fetch Transcript and Generate Summary
-  const handleFetchAndSummarize = async (urlToFetch: string) => {
+  // Main Action: Fetch Transcript and Generate Summary (or restore saved summary)
+  const handleFetchAndSummarize = async (urlToFetch: string, savedMarkdown?: string) => {
+    speechService.stop();
+    setActiveTimestamp(null);
     setErrorMessage(null);
     setIsLoading(true);
     setCurrentUrl(urlToFetch);
@@ -325,6 +328,18 @@ export default function App() {
       setFullText(transcriptData.fullText || '');
 
       setIsLoading(false);
+
+      if (savedMarkdown && savedMarkdown.trim()) {
+        setSummary({
+          markdown: savedMarkdown,
+          summaryType,
+          detailLevel,
+          provider,
+          model: selectedModel.id,
+          isTruncated: false,
+        });
+        return;
+      }
 
       await generateSummary(
         transcriptData.fullText,
@@ -630,6 +645,7 @@ export default function App() {
 
   const handleSeekToTimestamp = (seconds: number) => {
     setActiveTimestamp(seconds);
+    setSeekTrigger((prev) => prev + 1);
     if (!showVideo) {
       setShowVideo(true);
     }
@@ -719,6 +735,8 @@ export default function App() {
               onOpenManualModal={() => setIsManualModalOpen(true)}
               metadata={metadata}
               activeTimestamp={activeTimestamp}
+              seekTrigger={seekTrigger}
+              onTimeUpdate={setActiveTimestamp}
               showVideo={showVideo}
               onToggleShowVideo={() => setShowVideo((prev) => !prev)}
               videoSize={videoSize}
@@ -820,6 +838,8 @@ export default function App() {
               <VideoPlayerPanel
                 metadata={metadata}
                 activeTimestamp={activeTimestamp}
+                seekTrigger={seekTrigger}
+                onTimeUpdate={setActiveTimestamp}
                 currentTheme={theme}
                 size={videoSize}
                 onChangeSize={handleChangeVideoSize}
@@ -834,6 +854,8 @@ export default function App() {
             <VideoPlayerPanel
               metadata={metadata}
               activeTimestamp={activeTimestamp}
+              seekTrigger={seekTrigger}
+              onTimeUpdate={setActiveTimestamp}
               currentTheme={theme}
               size={videoSize}
               onChangeSize={handleChangeVideoSize}
@@ -853,6 +875,8 @@ export default function App() {
                 onRegenerate={handleRegenerate}
                 onContinueSummary={handleContinueSummary}
                 onSeekToTimestamp={handleSeekToTimestamp}
+                activeTimestamp={activeTimestamp}
+                onSyncTimestamp={setActiveTimestamp}
                 transcriptText={fullText}
                 videoTitle={metadata?.title || 'YouTube Video'}
                 openRouterKey={openRouterKey}
@@ -878,6 +902,7 @@ export default function App() {
                 metadata={metadata}
                 onSeekToTimestamp={handleSeekToTimestamp}
                 activeTimestamp={activeTimestamp}
+                onSyncTimestamp={setActiveTimestamp}
                 currentTheme={theme}
                 onOpenVoiceSettings={() => setIsVoiceSettingsOpen(true)}
                 onAppendToSummary={handleAppendCustomMarkdown}
@@ -893,6 +918,8 @@ export default function App() {
                 currentTheme={theme}
                 onAppendToSummary={handleAppendCustomMarkdown}
                 onSaveToList={handleSaveItemToList}
+                onSeekToTimestamp={handleSeekToTimestamp}
+                activeTimestamp={activeTimestamp}
                 onExploreTerm={(term) => {
                   setResearchInitialQuery(term);
                   setActiveTab('research');
@@ -950,10 +977,11 @@ export default function App() {
                 currentVideoMetadata={metadata}
                 currentVideoUrl={currentUrl}
                 currentSummaryMarkdown={summary?.markdown || fullText}
-                onLoadSavedVideo={(url) => {
+                onLoadSavedVideo={(url, savedMarkdown) => {
                   setActiveTab('summary');
-                  handleFetchAndSummarize(url);
+                  handleFetchAndSummarize(url, savedMarkdown);
                 }}
+                onAppendToSummary={handleAppendCustomMarkdown}
                 user={currentUser}
               />
             )}

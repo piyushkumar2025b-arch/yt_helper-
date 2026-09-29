@@ -34,6 +34,7 @@ interface TranscriptViewerProps {
     content?: string;
     notes?: string;
   }) => void;
+  onSyncTimestamp?: (seconds: number) => void;
 }
 
 export const TranscriptViewer: React.FC<TranscriptViewerProps> = ({
@@ -45,6 +46,7 @@ export const TranscriptViewer: React.FC<TranscriptViewerProps> = ({
   onOpenVoiceSettings,
   onAppendToSummary,
   onSaveToList,
+  onSyncTimestamp,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [copied, setCopied] = useState(false);
@@ -135,6 +137,51 @@ export const TranscriptViewer: React.FC<TranscriptViewerProps> = ({
       (s) => s.text.toLowerCase().includes(q) || s.formattedTime.includes(q)
     );
   }, [segments, searchQuery]);
+
+  // Exact interval matching so every second of video playback maps to its active transcript segment
+  const activeVideoSegIdx = useMemo(() => {
+    if (activeTimestamp === null || filteredSegments.length === 0) return -1;
+    for (let i = 0; i < filteredSegments.length; i++) {
+      const cur = filteredSegments[i];
+      const nextStart =
+        i + 1 < filteredSegments.length
+          ? filteredSegments[i + 1].start
+          : cur.start + Math.max(cur.duration || 8, 10);
+      if (activeTimestamp >= cur.start && activeTimestamp < nextStart) {
+        return i;
+      }
+    }
+    // Fallback to closest segment within 5 seconds
+    let bestIdx = -1;
+    let bestDiff = 5;
+    filteredSegments.forEach((seg, idx) => {
+      const diff = Math.abs(seg.start - activeTimestamp);
+      if (diff < bestDiff) {
+        bestDiff = diff;
+        bestIdx = idx;
+      }
+    });
+    return bestIdx;
+  }, [filteredSegments, activeTimestamp]);
+
+  // Auto-scroll transcript to follow live video playback when Auto-Scroll is enabled and TTS is not overriding
+  useEffect(() => {
+    if (activeVideoSegIdx >= 0 && autoScroll && !isSpeaking) {
+      const el = segmentRefs.current[activeVideoSegIdx];
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }
+  }, [activeVideoSegIdx, autoScroll, isSpeaking]);
+
+  // Sync activeTimestamp when audio narration steps through transcript segments
+  useEffect(() => {
+    if ((isSpeaking || isPaused) && speakingIdx >= 0 && onSyncTimestamp) {
+      if (viewMode === 'segments' && filteredSegments[speakingIdx]) {
+        onSyncTimestamp(filteredSegments[speakingIdx].start);
+      }
+    }
+  }, [speakingIdx, isSpeaking, isPaused, viewMode, filteredSegments, onSyncTimestamp]);
 
   const fullPlainText = useMemo(() => {
     return segments.map((s) => `[${s.formattedTime}] ${s.text}`).join('\n');
@@ -471,9 +518,7 @@ export const TranscriptViewer: React.FC<TranscriptViewerProps> = ({
           ) : (
             filteredSegments.map((seg, idx) => {
               const isCurrentSpeech = (isSpeaking || isPaused) && speakingIdx === idx;
-              const isCurrentVideo =
-                activeTimestamp !== null &&
-                Math.abs(seg.start - activeTimestamp) < 3;
+              const isCurrentVideo = activeVideoSegIdx === idx;
 
               return (
                 <div
@@ -481,11 +526,11 @@ export const TranscriptViewer: React.FC<TranscriptViewerProps> = ({
                   ref={(el) => {
                     segmentRefs.current[idx] = el;
                   }}
-                  className={`group flex items-baseline gap-6 py-3.5 px-3 rounded-lg transition-colors ${
+                  className={`group flex items-baseline gap-6 py-3 px-3 rounded-lg transition-colors ${
                     isCurrentSpeech
                       ? `${themeConfig.accentBg} border-l-2 border-indigo-500`
                       : isCurrentVideo
-                      ? 'bg-slate-500/5'
+                      ? `${themeConfig.accentBg} border-l-2 border-emerald-500`
                       : ''
                   }`}
                 >
@@ -493,11 +538,13 @@ export const TranscriptViewer: React.FC<TranscriptViewerProps> = ({
                     type="button"
                     onClick={() => onSeekToTimestamp(seg.start)}
                     className={`shrink-0 font-mono text-xs font-medium cursor-pointer tabular-nums w-14 text-left ${
-                      isCurrentSpeech || isCurrentVideo
+                      isCurrentSpeech
                         ? 'text-indigo-400 font-bold'
+                        : isCurrentVideo
+                        ? 'text-emerald-400 font-bold'
                         : `${themeConfig.textMuted} hover:text-indigo-400`
                     }`}
-                    title="Jump to timestamp"
+                    title="Jump video to this timestamp"
                   >
                     {seg.formattedTime}
                   </button>

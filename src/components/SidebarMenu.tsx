@@ -47,6 +47,8 @@ interface SidebarMenuProps {
   onOpenManualModal: () => void;
   metadata: VideoMetadata | null;
   activeTimestamp: number | null;
+  seekTrigger?: number;
+  onTimeUpdate?: (seconds: number) => void;
   showVideo: boolean;
   onToggleShowVideo: () => void;
   videoSize?: VideoPlayerSize;
@@ -86,6 +88,8 @@ export const SidebarMenu: React.FC<SidebarMenuProps> = ({
   onOpenManualModal,
   metadata,
   activeTimestamp,
+  seekTrigger = 0,
+  onTimeUpdate,
   showVideo,
   onToggleShowVideo,
   videoSize = 'md',
@@ -580,6 +584,8 @@ export const SidebarMenu: React.FC<SidebarMenuProps> = ({
                   <VideoPlayerPanel
                     metadata={metadata}
                     activeTimestamp={activeTimestamp}
+                    seekTrigger={seekTrigger}
+                    onTimeUpdate={onTimeUpdate}
                     currentTheme={currentTheme}
                     size={videoSize}
                     onChangeSize={onChangeVideoSize}
