@@ -62,11 +62,19 @@ export interface SummaryResult {
     totalTokens: number;
   };
   summaryType: SummaryType;
+  detailLevel?: DetailLevel;
   createdAt: string;
   isTruncated?: boolean;
   finishReason?: string;
   continuationCount?: number;
   lastContinuationText?: string;
+}
+
+export interface ChatMessage {
+  id?: string;
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp?: string;
 }
 
 export interface WorkflowStep {
@@ -253,7 +261,7 @@ export interface CrucialTermItem {
   fullForm?: string;
   category: 'acronym' | 'core_concept' | 'entity' | 'rule_of_thumb';
   definition: string;
-  contextInVideo: string;
+  contextInVideo?: string;
   importance: 'critical' | 'high' | 'recommended';
   tag?: string;
 }

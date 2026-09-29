@@ -292,10 +292,10 @@ Grant Sanderson (3Blue1Brown) pulls back the curtain on **neural networks** by s
   Your brain effortlessly recognizes a handwritten "3" even when the pixels are completely different from one drawing to the next. If you tried to write traditional if-else code to recognize a "3", you would quickly get stuck. This is where a neural network shines.
 
 - **[01:55] What a "Neuron" Actually Is (Just a Number Between 0 and 1)**:
-  Grant asks us to forget biological brains for a moment and picture a neuron as a simple container holding a number between `0` (completely dark) and `1` (brightly lit). The first layer of the network has **784 neurons**—one for each pixel in the 28×28 image.
+  Grant asks us to forget biological brains for a moment and picture a neuron as a simple container holding a number between **0** (completely dark) and **1** (brightly lit). The first layer of the network has **784 neurons**—one for each pixel in the 28×28 image.
 
 - **[03:45] Hidden Layers: Spotting Loops, Edges, and Pieces**:
-  The final layer has **10 neurons** representing the digits `0` through `9`, and whichever lights up brightest is the network's guess. In between sit the **hidden layers**. Grant walks through the intuition: the first hidden layer might learn to spot tiny short edges, the next layer combines those edges into loops and long lines, and the final layer combines a top loop and bottom loop into an `8` or a `9`.
+  The final layer has **10 neurons** representing the digits **0** through **9**, and whichever lights up brightest is the network's guess. In between sit the **hidden layers**. Grant walks through the intuition: the first hidden layer might learn to spot tiny short edges, the next layer combines those edges into loops and long lines, and the final layer combines a top loop and bottom loop into an **8** or a **9**.
 
 - **[08:15] Weights, Biases, and Why They Work**:
   How does one layer make the next layer light up? Every connection has a **weight** (a positive or negative number showing whether a pixel helps or hurts that edge), and every neuron has a **bias** (a threshold for how hard it is to turn on). You multiply the brightness of each pixel by its weight, add them all up, add the bias, and squash the result into a clean range using a function like **Sigmoid** or **ReLU**.
@@ -329,13 +329,13 @@ Derek Muller (Veritasium) explores the **Collatz Conjecture** (also known as the
 ## Step-by-Step Story Walkthrough
 
 - **[00:00] A Game Anyone Can Play**:
-  Pick any positive whole number. Follow two simple rules: if the number is **odd**, multiply it by 3 and add 1 (`3x + 1`); if the number is **even**, cut it in half (`x / 2`). Repeat over and over.
+  Pick any positive whole number. Follow two simple rules: if the number is **odd**, multiply it by 3 and add 1 (**3x + 1**); if the number is **even**, cut it in half (**x / 2**). Repeat over and over.
 
 - **[01:40] Every Number Tested Falls into the 4 → 2 → 1 Loop**:
-  No matter what starting number you pick, the sequence bounces up and down like hailstones in a storm (which is why they are called **hailstone numbers**) before eventually hitting `4`, then `2`, then `1`, and looping `4 → 2 → 1` forever.
+  No matter what starting number you pick, the sequence bounces up and down like hailstones in a storm (which is why they are called **hailstone numbers**) before eventually hitting **4**, then **2**, then **1**, and looping **4 → 2 → 1** forever.
 
 - **[05:10] The Rollercoaster of Starting with 27**:
-  Most small numbers drop to 1 quickly, but if you start at `27`, the number climbs all the way up to `9,232` before finally crashing down to `1` after 111 steps. Computers have checked every number up to $2^{68}$ (nearly 300 quintillion), and every single one eventually reaches 1—yet nobody can prove a runaway number doesn't exist further out.
+  Most small numbers drop to 1 quickly, but if you start at **27**, the number climbs all the way up to **9,232** before finally crashing down to **1** after 111 steps. Computers have checked every number up to 2^68 (nearly 300 quintillion), and every single one eventually reaches 1—yet nobody can prove a runaway number doesn't exist further out.
 
 - **[12:30] Why Probability Says It Should Shrink (But Can't Prove It)**:
   On average, multiplying by 3 and dividing by 2 roughly shrinks numbers over time, which creates beautiful organic "coral tree" graphs when plotted backward from 1. Still, as the legendary mathematician Paul Erdős put it: *"Mathematics may not be ready for such problems."*
