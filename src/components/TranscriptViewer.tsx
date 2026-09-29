@@ -343,31 +343,31 @@ export const TranscriptViewer: React.FC<TranscriptViewerProps> = ({
           />
         </div>
 
-        <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex items-center gap-1.5 flex-wrap">
           <button
             type="button"
             onClick={handleToggleTopReadAloud}
-            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-colors cursor-pointer whitespace-nowrap ${
+            className={`inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium rounded transition-colors cursor-pointer whitespace-nowrap ${
               isSpeaking
                 ? 'bg-indigo-600 text-white'
-                : `${themeConfig.textSecondary} hover:${themeConfig.textPrimary} hover:bg-slate-500/10`
+                : `${themeConfig.textSecondary} hover:${themeConfig.textPrimary} bg-slate-500/10 hover:bg-slate-500/15`
             }`}
           >
-            {isSpeaking && !isPaused ? <Pause className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
-            <span>{isSpeaking && !isPaused ? 'Pause Audio' : 'Read Aloud'}</span>
+            {isSpeaking && !isPaused ? <Pause className="w-3 h-3" /> : <Volume2 className="w-3 h-3" />}
+            <span>{isSpeaking && !isPaused ? 'Pause' : 'Read Aloud'}</span>
           </button>
 
           <button
             type="button"
             onClick={() => speechService.setAutoScroll(!autoScroll)}
-            className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-lg transition-colors cursor-pointer whitespace-nowrap ${
+            className={`inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium rounded transition-colors cursor-pointer whitespace-nowrap ${
               autoScroll
                 ? `${themeConfig.accentBg} ${themeConfig.accent} font-semibold`
-                : `${themeConfig.textMuted} hover:${themeConfig.textPrimary} hover:bg-slate-500/10`
+                : `${themeConfig.textMuted} hover:${themeConfig.textPrimary} bg-slate-500/10`
             }`}
             title="Automatically scroll to active spoken word"
           >
-            <ArrowDownCircle className="w-3.5 h-3.5" />
+            <ArrowDownCircle className="w-3 h-3" />
             <span>Auto-Scroll: {autoScroll ? 'On' : 'Off'}</span>
           </button>
 
@@ -375,48 +375,48 @@ export const TranscriptViewer: React.FC<TranscriptViewerProps> = ({
             <button
               type="button"
               onClick={onOpenVoiceSettings}
-              className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-lg ${themeConfig.textSecondary} hover:${themeConfig.textPrimary} hover:bg-slate-500/10 transition-colors cursor-pointer`}
-              title="Select Studio Neural Voice & Speed"
+              className={`inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium rounded ${themeConfig.textSecondary} hover:${themeConfig.textPrimary} bg-slate-500/10 hover:bg-slate-500/15 transition-colors cursor-pointer`}
+              title="Select Voice & Speed"
             >
-              <Sliders className="w-3.5 h-3.5" />
-              <span>Voices</span>
+              <Sliders className="w-3 h-3" />
+              <span>Voice</span>
             </button>
           )}
 
           {/* View Mode Toggle */}
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-0.5 bg-slate-500/10 p-0.5 rounded">
             <button
               type="button"
               onClick={() => setViewMode('segments')}
-              className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-lg transition-colors cursor-pointer ${
+              className={`inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium rounded transition-colors cursor-pointer ${
                 viewMode === 'segments'
                   ? `${themeConfig.accentBg} ${themeConfig.accent} font-semibold`
                   : `${themeConfig.textMuted} hover:${themeConfig.textPrimary}`
               }`}
             >
-              <List className="w-3.5 h-3.5" />
+              <List className="w-3 h-3" />
               <span>Timeline</span>
             </button>
             <button
               type="button"
               onClick={() => setViewMode('article')}
-              className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-lg transition-colors cursor-pointer ${
+              className={`inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium rounded transition-colors cursor-pointer ${
                 viewMode === 'article'
                   ? `${themeConfig.accentBg} ${themeConfig.accent} font-semibold`
                   : `${themeConfig.textMuted} hover:${themeConfig.textPrimary}`
               }`}
             >
-              <AlignLeft className="w-3.5 h-3.5" />
-              <span>Continuous Text</span>
+              <AlignLeft className="w-3 h-3" />
+              <span>Paragraphs</span>
             </button>
           </div>
 
           <button
             type="button"
             onClick={handleCopyAll}
-            className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-lg ${themeConfig.textSecondary} hover:${themeConfig.textPrimary} hover:bg-slate-500/10 transition-colors cursor-pointer`}
+            className={`inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium rounded ${themeConfig.textSecondary} hover:${themeConfig.textPrimary} bg-slate-500/10 hover:bg-slate-500/15 transition-colors cursor-pointer`}
           >
-            {copied ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+            {copied ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
             <span>{copied ? 'Copied' : 'Copy'}</span>
           </button>
 
@@ -425,11 +425,11 @@ export const TranscriptViewer: React.FC<TranscriptViewerProps> = ({
             <button
               type="button"
               onClick={() => setIsExportOpen(!isExportOpen)}
-              className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-lg ${themeConfig.textSecondary} hover:${themeConfig.textPrimary} hover:bg-slate-500/10 transition-colors cursor-pointer`}
+              className={`inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium rounded ${themeConfig.textSecondary} hover:${themeConfig.textPrimary} bg-slate-500/10 hover:bg-slate-500/15 transition-colors cursor-pointer`}
             >
-              <Download className="w-3.5 h-3.5" />
-              <span>Export</span>
-              <ChevronDown className="w-3 h-3 opacity-60" />
+              <Download className="w-3 h-3" />
+              <span>Save</span>
+              <ChevronDown className="w-2.5 h-2.5 opacity-60" />
             </button>
 
             {isExportOpen && (

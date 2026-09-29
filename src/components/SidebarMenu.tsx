@@ -235,7 +235,7 @@ export const SidebarMenu: React.FC<SidebarMenuProps> = ({
     { id: 'transcript', label: 'Full Transcript', icon: List },
     { id: 'knowledge', label: 'Key Ideas & Words', icon: BookOpen },
     { id: 'research', label: 'Explore Videos & Books', icon: Globe },
-    { id: 'lists', label: 'My Saved Lists (Firebase)', icon: Bookmark },
+    { id: 'lists', label: 'Saved Lists', icon: Bookmark },
     { id: 'scrape', label: 'Downloads & Info', icon: Database },
     { id: 'chat', label: 'Ask Anything', icon: MessageSquare },
   ] as const;
@@ -263,32 +263,32 @@ export const SidebarMenu: React.FC<SidebarMenuProps> = ({
       </div>
 
       {/* Scrollable Content Inside Sidebar */}
-      <div className="flex-1 overflow-y-auto px-3 py-1.5 space-y-3.5 text-[11px]">
+      <div className="flex-1 overflow-y-auto px-2.5 py-1.5 space-y-3 text-[11px]">
         {/* 1. Source Input & YouTube Search Section */}
-        <div className="space-y-3">
+        <div className="space-y-2">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2.5">
               <button
                 type="button"
                 onClick={() => setSourceMode('url')}
-                className={`text-[11px] font-semibold uppercase tracking-wider cursor-pointer transition-colors ${
+                className={`text-[11px] font-semibold cursor-pointer transition-colors ${
                   sourceMode === 'url'
                     ? `${themeConfig.textPrimary} underline underline-offset-4 decoration-indigo-500`
                     : `${themeConfig.textMuted} hover:${themeConfig.textSecondary}`
                 }`}
               >
-                Source URL
+                Video Link
               </button>
               <button
                 type="button"
                 onClick={() => setSourceMode('search')}
-                className={`text-[11px] font-semibold uppercase tracking-wider cursor-pointer transition-colors ${
+                className={`text-[11px] font-semibold cursor-pointer transition-colors ${
                   sourceMode === 'search'
                     ? `${themeConfig.textPrimary} underline underline-offset-4 decoration-indigo-500`
                     : `${themeConfig.textMuted} hover:${themeConfig.textSecondary}`
                 }`}
               >
-                YouTube Search
+                Search YouTube
               </button>
             </div>
 
@@ -296,15 +296,15 @@ export const SidebarMenu: React.FC<SidebarMenuProps> = ({
               <button
                 type="button"
                 onClick={() => setIsSamplesOpen(!isSamplesOpen)}
-                className={`text-xs font-medium ${themeConfig.textSecondary} hover:${themeConfig.textPrimary} transition-colors cursor-pointer flex items-center gap-1`}
+                className={`text-[11px] font-medium px-1.5 py-0.5 rounded bg-slate-500/10 ${themeConfig.textSecondary} hover:${themeConfig.textPrimary} transition-colors cursor-pointer flex items-center gap-1`}
               >
-                <span>Import</span>
-                <ChevronDown className="w-3 h-3 opacity-60" />
+                <span>Samples</span>
+                <ChevronDown className="w-2.5 h-2.5 opacity-60" />
               </button>
 
               {isSamplesOpen && (
                 <div
-                  className={`absolute right-0 mt-1.5 w-64 rounded-lg ${themeConfig.cardBg} shadow-2xl p-1.5 z-50 space-y-0.5`}
+                  className={`absolute right-0 mt-1 w-60 rounded-lg ${themeConfig.cardBg} shadow-2xl p-1 z-50 space-y-0.5 border ${themeConfig.borderLight}`}
                 >
                   <button
                     type="button"
@@ -312,23 +312,23 @@ export const SidebarMenu: React.FC<SidebarMenuProps> = ({
                       setIsSamplesOpen(false);
                       onOpenManualModal();
                     }}
-                    className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-md text-xs text-left ${themeConfig.textPrimary} hover:bg-slate-500/10 cursor-pointer font-medium`}
+                    className={`w-full flex items-center gap-1.5 px-2 py-1.5 rounded text-[11px] text-left ${themeConfig.textPrimary} hover:bg-slate-500/10 cursor-pointer font-medium`}
                   >
-                    <FileText className="w-3.5 h-3.5 opacity-70" />
-                    <span>Import or paste transcript</span>
+                    <FileText className="w-3 h-3 opacity-70" />
+                    <span>Paste or upload transcript</span>
                   </button>
-                  <div className="px-2.5 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wider opacity-50">
-                    Reference Presentations
+                  <div className="px-2 pt-1.5 pb-0.5 text-[10px] font-semibold uppercase tracking-wider opacity-50">
+                    Sample Videos
                   </div>
                   {SAMPLE_VIDEOS.map((s) => (
                     <button
                       key={s.id}
                       type="button"
                       onClick={() => handleSelectSample(s)}
-                      className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-md text-xs ${themeConfig.textSecondary} hover:bg-slate-500/10 text-left transition-colors cursor-pointer truncate`}
+                      className={`w-full flex items-center justify-between px-2 py-1 rounded text-[11px] ${themeConfig.textSecondary} hover:bg-slate-500/10 text-left transition-colors cursor-pointer truncate`}
                     >
                       <span className="truncate pr-2">{s.title.split('|')[0]}</span>
-                      <Play className="w-3 h-3 opacity-40 shrink-0" />
+                      <Play className="w-2.5 h-2.5 opacity-40 shrink-0" />
                     </button>
                   ))}
                 </div>
@@ -337,23 +337,23 @@ export const SidebarMenu: React.FC<SidebarMenuProps> = ({
           </div>
 
           {sourceMode === 'url' ? (
-            <form onSubmit={handleSubmitUrlForm} className="space-y-2">
+            <form onSubmit={handleSubmitUrlForm} className="space-y-1.5">
               <div className="relative">
                 <input
                   type="text"
                   value={urlInput}
                   onChange={(e) => setUrlInput(e.target.value)}
-                  placeholder="Paste YouTube URL or search topic..."
-                  className={`w-full pl-3 pr-8 py-2 rounded-md text-xs bg-slate-500/10 ${themeConfig.textPrimary} placeholder:opacity-40 focus:outline-none focus:bg-slate-500/15`}
+                  placeholder="Paste YouTube link or search topic..."
+                  className={`w-full pl-2.5 pr-7 py-1.5 rounded text-[11px] bg-slate-500/10 ${themeConfig.textPrimary} placeholder:opacity-40 focus:outline-none focus:bg-slate-500/15`}
                   disabled={isLoading}
                 />
                 {urlInput && (
                   <button
                     type="button"
                     onClick={() => setUrlInput('')}
-                    className="absolute right-2.5 top-2 text-slate-400 hover:text-slate-200 cursor-pointer"
+                    className="absolute right-2 top-1.5 text-slate-400 hover:text-slate-200 cursor-pointer"
                   >
-                    <X className="w-3.5 h-3.5" />
+                    <X className="w-3 h-3" />
                   </button>
                 )}
               </div>
@@ -361,11 +361,11 @@ export const SidebarMenu: React.FC<SidebarMenuProps> = ({
               <button
                 type="submit"
                 disabled={!urlInput.trim() || isLoading}
-                className={`w-full flex items-center justify-center gap-2 py-2 px-4 rounded-md text-xs font-semibold ${themeConfig.primaryButton} transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap`}
+                className={`w-full flex items-center justify-center gap-1.5 py-1.5 px-3 rounded text-[11px] font-semibold ${themeConfig.primaryButton} transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap`}
               >
                 {isLoading ? (
                   <>
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <Loader2 className="w-3 h-3 animate-spin" />
                     <span>Reading video...</span>
                   </>
                 ) : (
@@ -374,66 +374,66 @@ export const SidebarMenu: React.FC<SidebarMenuProps> = ({
               </button>
             </form>
           ) : (
-            <div className="space-y-3">
-              <form onSubmit={handleSubmitYtSearch} className="flex items-center gap-1.5">
+            <div className="space-y-2">
+              <form onSubmit={handleSubmitYtSearch} className="flex items-center gap-1">
                 <div className="relative flex-1">
                   <input
                     type="text"
                     value={ytQuery}
                     onChange={(e) => setYtQuery(e.target.value)}
-                    placeholder="Search YouTube lectures, talks..."
-                    className={`w-full pl-3 pr-7 py-2 rounded-md text-xs bg-slate-500/10 ${themeConfig.textPrimary} placeholder:opacity-40 focus:outline-none focus:bg-slate-500/15`}
+                    placeholder="Search YouTube talks, topics..."
+                    className={`w-full pl-2.5 pr-6 py-1.5 rounded text-[11px] bg-slate-500/10 ${themeConfig.textPrimary} placeholder:opacity-40 focus:outline-none focus:bg-slate-500/15`}
                     disabled={isSearchingYt}
                   />
                   {ytQuery && (
                     <button
                       type="button"
                       onClick={() => setYtQuery('')}
-                      className="absolute right-2 top-2 text-slate-400 hover:text-slate-200 cursor-pointer"
+                      className="absolute right-1.5 top-1.5 text-slate-400 hover:text-slate-200 cursor-pointer"
                     >
-                      <X className="w-3.5 h-3.5" />
+                      <X className="w-3 h-3" />
                     </button>
                   )}
                 </div>
                 <button
                   type="submit"
                   disabled={!ytQuery.trim() || isSearchingYt}
-                  className={`p-2 rounded-md ${themeConfig.primaryButton} disabled:opacity-40 cursor-pointer shrink-0`}
+                  className={`p-1.5 rounded ${themeConfig.primaryButton} disabled:opacity-40 cursor-pointer shrink-0`}
                   title="Search YouTube"
                 >
                   {isSearchingYt ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <Loader2 className="w-3 h-3 animate-spin" />
                   ) : (
-                    <Search className="w-3.5 h-3.5" />
+                    <Search className="w-3 h-3" />
                   )}
                 </button>
               </form>
 
               {ytError && (
-                <p className="text-[11px] text-rose-400">{ytError}</p>
+                <p className="text-[10px] text-rose-400">{ytError}</p>
               )}
 
               {ytResults.length > 0 && (
                 <div
                   onScroll={handleYtListScroll}
-                  className={`divide-y ${themeConfig.borderLight} max-h-96 overflow-y-auto pr-1`}
+                  className={`divide-y ${themeConfig.borderLight} max-h-80 overflow-y-auto pr-1`}
                 >
                   {ytResults.map((vid) => (
                     <button
                       key={vid.videoId}
                       type="button"
                       onClick={() => handleSelectYtVideo(vid)}
-                      className="w-full py-2.5 first:pt-1 last:pb-1 flex items-start gap-2.5 text-left hover:bg-slate-500/10 rounded-md px-1.5 transition-colors cursor-pointer group"
+                      className="w-full py-2 first:pt-1 last:pb-1 flex items-start gap-2 text-left hover:bg-slate-500/10 rounded px-1 transition-colors cursor-pointer group"
                     >
                       <img
                         src={vid.thumbnailUrl}
                         alt={vid.title}
                         referrerPolicy="no-referrer"
-                        className="w-16 aspect-video object-cover rounded shrink-0 bg-black/30 mt-0.5"
+                        className="w-14 aspect-video object-cover rounded shrink-0 bg-black/30 mt-0.5"
                         loading="lazy"
                       />
                       <div className="min-w-0 flex-1 space-y-0.5">
-                        <p className={`text-xs font-medium line-clamp-2 leading-snug ${themeConfig.textPrimary} group-hover:text-indigo-400 transition-colors`}>
+                        <p className={`text-[11px] font-medium line-clamp-2 leading-snug ${themeConfig.textPrimary} group-hover:text-indigo-400 transition-colors`}>
                           {vid.title}
                         </p>
                         <p className={`text-[10px] truncate ${themeConfig.textMuted}`}>
@@ -443,19 +443,19 @@ export const SidebarMenu: React.FC<SidebarMenuProps> = ({
                     </button>
                   ))}
 
-                  <div className="py-2 text-center">
+                  <div className="py-1.5 text-center">
                     {isLoadingMoreYt ? (
-                      <span className="inline-flex items-center gap-1.5 text-[11px] text-indigo-400">
-                        <Loader2 className="w-3 h-3 animate-spin" />
-                        <span>Loading more videos...</span>
+                      <span className="inline-flex items-center gap-1 text-[10px] text-indigo-400">
+                        <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                        <span>Loading more...</span>
                       </span>
                     ) : (
                       <button
                         type="button"
                         onClick={loadMoreYouTubeResults}
-                        className={`text-[11px] font-medium ${themeConfig.textMuted} hover:${themeConfig.textPrimary} cursor-pointer`}
+                        className={`text-[10px] font-medium ${themeConfig.textMuted} hover:${themeConfig.textPrimary} cursor-pointer`}
                       >
-                        Scroll or click for more ({ytResults.length} loaded)
+                        Load more ({ytResults.length} shown)
                       </button>
                     )}
                   </div>
@@ -466,9 +466,9 @@ export const SidebarMenu: React.FC<SidebarMenuProps> = ({
         </div>
 
         {/* 2. Navigation Views Section */}
-        <div className="space-y-2">
-          <label className={`text-[11px] font-semibold uppercase tracking-wider ${themeConfig.textMuted} block`}>
-            Sections
+        <div className="space-y-1">
+          <label className={`text-[10px] font-semibold uppercase tracking-wider ${themeConfig.textMuted} block`}>
+            Views
           </label>
           <div className="space-y-0.5">
             {navItems.map((item) => {
@@ -479,13 +479,13 @@ export const SidebarMenu: React.FC<SidebarMenuProps> = ({
                   key={item.id}
                   type="button"
                   onClick={() => onSelectTab(item.id)}
-                  className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-xs font-medium transition-colors cursor-pointer whitespace-nowrap ${
+                  className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded text-[11px] font-medium transition-colors cursor-pointer whitespace-nowrap ${
                     isActive
                       ? `${themeConfig.accentBg} ${themeConfig.accent} font-semibold`
                       : `${themeConfig.textSecondary} hover:${themeConfig.textPrimary} hover:bg-slate-500/10`
                   }`}
                 >
-                  <Icon className="w-4 h-4 shrink-0 opacity-75" />
+                  <Icon className="w-3.5 h-3.5 shrink-0 opacity-75" />
                   <span className="truncate">{item.label}</span>
                 </button>
               );
@@ -495,28 +495,28 @@ export const SidebarMenu: React.FC<SidebarMenuProps> = ({
 
         {/* 3. Active Document Metadata & Player Toggle */}
         {metadata && (
-          <div className="space-y-2.5">
+          <div className="space-y-1.5">
             <div className="flex items-center justify-between">
-              <span className={`text-[11px] font-semibold uppercase tracking-wider ${themeConfig.textMuted}`}>
-                Active Source
+              <span className={`text-[10px] font-semibold uppercase tracking-wider ${themeConfig.textMuted}`}>
+                Current Video
               </span>
               {metadata.videoId && (
                 <button
                   type="button"
                   onClick={onToggleShowVideo}
-                  className={`text-xs font-medium flex items-center gap-1.5 ${themeConfig.textSecondary} hover:${themeConfig.textPrimary} transition-colors cursor-pointer whitespace-nowrap`}
+                  className={`text-[11px] font-medium px-1.5 py-0.5 rounded bg-slate-500/10 flex items-center gap-1 ${themeConfig.textSecondary} hover:${themeConfig.textPrimary} transition-colors cursor-pointer whitespace-nowrap`}
                 >
-                  <Tv className="w-3.5 h-3.5 opacity-75" />
+                  <Tv className="w-3 h-3 opacity-75" />
                   <span>{showVideo ? 'Hide Video' : 'Show Video'}</span>
                 </button>
               )}
             </div>
 
-            <div className="space-y-1">
-              <div className={`font-medium leading-snug ${themeConfig.textPrimary}`}>
+            <div className="space-y-0.5">
+              <div className={`font-medium text-[11px] leading-snug ${themeConfig.textPrimary}`}>
                 {metadata.title}
               </div>
-              <div className={`text-[11px] ${themeConfig.textMuted} flex items-center gap-1.5 tabular-nums flex-wrap`}>
+              <div className={`text-[10px] ${themeConfig.textMuted} flex items-center gap-1 tabular-nums flex-wrap`}>
                 <span>{metadata.authorName || 'Source'}</span>
                 {metadata.durationFormatted && (
                   <>
@@ -534,18 +534,17 @@ export const SidebarMenu: React.FC<SidebarMenuProps> = ({
             </div>
 
             {showVideo && metadata.videoId && (
-              <div className="pt-1 space-y-2">
-                {/* Quick Size & Placement Selector in Sidebar */}
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between text-[11px]">
-                    <span className={themeConfig.textMuted}>Player Size:</span>
+              <div className="pt-1 space-y-1.5">
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between text-[10px]">
+                    <span className={themeConfig.textMuted}>Size:</span>
                     <div className="flex items-center gap-1">
                       {(['sm', 'md', 'lg', 'xl'] as VideoPlayerSize[]).map((sz) => (
                         <button
                           key={sz}
                           type="button"
                           onClick={() => onChangeVideoSize?.(sz)}
-                          className={`px-2 py-0.5 rounded text-[10px] font-semibold cursor-pointer transition-colors ${
+                          className={`px-1.5 py-0.5 rounded text-[10px] font-semibold cursor-pointer transition-colors ${
                             videoSize === sz
                               ? `${themeConfig.accentBg} ${themeConfig.accent}`
                               : `${themeConfig.textMuted} hover:${themeConfig.textPrimary} bg-slate-500/10`
@@ -560,15 +559,15 @@ export const SidebarMenu: React.FC<SidebarMenuProps> = ({
 
                   <div className="grid grid-cols-3 gap-1 text-[10px]">
                     {([
-                      { id: 'floating', label: 'Float Anywhere' },
-                      { id: 'docked-top', label: 'Top of Page' },
-                      { id: 'sidebar', label: 'In Sidebar' },
+                      { id: 'floating', label: 'Floating' },
+                      { id: 'docked-top', label: 'Top' },
+                      { id: 'sidebar', label: 'Sidebar' },
                     ] as Array<{ id: VideoPlacementMode; label: string }>).map((mode) => (
                       <button
                         key={mode.id}
                         type="button"
                         onClick={() => onChangeVideoPlacement?.(mode.id)}
-                        className={`py-1 px-1.5 rounded font-medium cursor-pointer text-center truncate transition-colors ${
+                        className={`py-0.5 px-1 rounded font-medium cursor-pointer text-center truncate transition-colors ${
                           videoPlacement === mode.id
                             ? `${themeConfig.accentBg} ${themeConfig.accent} font-semibold`
                             : `${themeConfig.textMuted} hover:${themeConfig.textPrimary} bg-slate-500/10`
@@ -601,18 +600,17 @@ export const SidebarMenu: React.FC<SidebarMenuProps> = ({
         )}
 
         {/* 4. Synthesis Configuration */}
-        <div className="space-y-3">
-          <label className={`text-[11px] font-semibold uppercase tracking-wider ${themeConfig.textMuted} block`}>
+        <div className="space-y-2">
+          <label className={`text-[10px] font-semibold uppercase tracking-wider ${themeConfig.textMuted} block`}>
             Summary Style
           </label>
 
-          <div className="space-y-3">
+          <div className="space-y-2">
             <div>
-              <span className={`text-[11px] ${themeConfig.textSecondary} block mb-1.5`}>How should we write it?</span>
               <select
                 value={summaryType}
                 onChange={(e) => onChangeSummaryType(e.target.value as SummaryType)}
-                className={`w-full py-2 px-3 rounded-md text-xs bg-slate-500/10 ${themeConfig.textPrimary} cursor-pointer focus:outline-none`}
+                className={`w-full py-1.5 px-2.5 rounded text-[11px] bg-slate-500/10 ${themeConfig.textPrimary} cursor-pointer focus:outline-none`}
               >
                 {SUMMARY_PRESETS.map((p) => (
                   <option key={p.id} value={p.id} className="bg-slate-900 text-white">
@@ -622,35 +620,32 @@ export const SidebarMenu: React.FC<SidebarMenuProps> = ({
               </select>
             </div>
 
-            <div>
-              <span className={`text-[11px] ${themeConfig.textSecondary} block mb-1.5`}>How much detail?</span>
-              <div className="grid grid-cols-3 gap-1">
-                {([
-                  { id: 'balanced', label: 'Normal' },
-                  { id: 'extensive', label: 'Detailed' },
-                  { id: 'massive', label: 'Everything' },
-                ] as Array<{ id: DetailLevel; label: string }>).map((lvl) => (
-                  <button
-                    key={lvl.id}
-                    type="button"
-                    onClick={() => onChangeDetailLevel(lvl.id)}
-                    className={`py-1.5 px-2 text-xs font-medium rounded-md transition-colors cursor-pointer text-center whitespace-nowrap ${
-                      detailLevel === lvl.id
-                        ? `${themeConfig.accentBg} ${themeConfig.accent} font-semibold`
-                        : `${themeConfig.textMuted} hover:${themeConfig.textPrimary} hover:bg-slate-500/10`
-                    }`}
-                  >
-                    {lvl.label}
-                  </button>
-                ))}
-              </div>
+            <div className="grid grid-cols-3 gap-1">
+              {([
+                { id: 'balanced', label: 'Normal' },
+                { id: 'extensive', label: 'Detailed' },
+                { id: 'massive', label: 'Complete' },
+              ] as Array<{ id: DetailLevel; label: string }>).map((lvl) => (
+                <button
+                  key={lvl.id}
+                  type="button"
+                  onClick={() => onChangeDetailLevel(lvl.id)}
+                  className={`py-1 px-1.5 text-[11px] font-medium rounded transition-colors cursor-pointer text-center whitespace-nowrap ${
+                    detailLevel === lvl.id
+                      ? `${themeConfig.accentBg} ${themeConfig.accent} font-semibold`
+                      : `${themeConfig.textMuted} hover:${themeConfig.textPrimary} bg-slate-500/5 hover:bg-slate-500/10`
+                  }`}
+                >
+                  {lvl.label}
+                </button>
+              ))}
             </div>
           </div>
         </div>
 
         {/* 5. Preferences */}
-        <div className="space-y-2">
-          <label className={`text-[11px] font-semibold uppercase tracking-wider ${themeConfig.textMuted} block`}>
+        <div className="space-y-1">
+          <label className={`text-[10px] font-semibold uppercase tracking-wider ${themeConfig.textMuted} block`}>
             Reading &amp; Voice
           </label>
 
@@ -658,10 +653,10 @@ export const SidebarMenu: React.FC<SidebarMenuProps> = ({
             <button
               type="button"
               onClick={onOpenTypography}
-              className={`w-full flex items-center justify-between px-3 py-2 rounded-md text-xs ${themeConfig.textSecondary} hover:${themeConfig.textPrimary} hover:bg-slate-500/10 transition-colors cursor-pointer`}
+              className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded text-[11px] ${themeConfig.textSecondary} hover:${themeConfig.textPrimary} hover:bg-slate-500/10 transition-colors cursor-pointer`}
             >
-              <div className="flex items-center gap-2.5">
-                <Type className="w-4 h-4 opacity-75" />
+              <div className="flex items-center gap-2">
+                <Type className="w-3.5 h-3.5 opacity-75" />
                 <span>Font &amp; Text Size</span>
               </div>
             </button>
@@ -669,10 +664,10 @@ export const SidebarMenu: React.FC<SidebarMenuProps> = ({
             <button
               type="button"
               onClick={onOpenVoiceSettings}
-              className={`w-full flex items-center justify-between px-3 py-2 rounded-md text-xs ${themeConfig.textSecondary} hover:${themeConfig.textPrimary} hover:bg-slate-500/10 transition-colors cursor-pointer`}
+              className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded text-[11px] ${themeConfig.textSecondary} hover:${themeConfig.textPrimary} hover:bg-slate-500/10 transition-colors cursor-pointer`}
             >
-              <div className="flex items-center gap-2.5">
-                <Volume2 className="w-4 h-4 opacity-75" />
+              <div className="flex items-center gap-2">
+                <Volume2 className="w-3.5 h-3.5 opacity-75" />
                 <span>Read-Aloud Voice</span>
               </div>
             </button>
@@ -680,23 +675,23 @@ export const SidebarMenu: React.FC<SidebarMenuProps> = ({
             <button
               type="button"
               onClick={onOpenSettings}
-              className={`w-full flex items-center justify-between px-3 py-2 rounded-md text-xs ${themeConfig.textSecondary} hover:${themeConfig.textPrimary} hover:bg-slate-500/10 transition-colors cursor-pointer`}
+              className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded text-[11px] ${themeConfig.textSecondary} hover:${themeConfig.textPrimary} hover:bg-slate-500/10 transition-colors cursor-pointer`}
             >
-              <div className="flex items-center gap-2.5 truncate">
-                <KeyRound className="w-4 h-4 shrink-0 opacity-75" />
+              <div className="flex items-center gap-2 truncate">
+                <KeyRound className="w-3.5 h-3.5 shrink-0 opacity-75" />
                 <span className="truncate">
-                  {provider === 'gemini' ? 'Gemini 3.8 Flash' : selectedModel.name}
+                  {provider === 'gemini' ? 'Built-in Writer' : selectedModel.name}
                 </span>
               </div>
-              <Sliders className="w-3.5 h-3.5 opacity-50 shrink-0" />
+              <Sliders className="w-3 h-3 opacity-50 shrink-0" />
             </button>
           </div>
         </div>
 
         {/* 6. Theme Selector */}
-        <div className="space-y-2">
-          <label className={`text-[11px] font-semibold uppercase tracking-wider ${themeConfig.textMuted} block`}>
-            Appearance (12 Themes)
+        <div className="space-y-1.5">
+          <label className={`text-[10px] font-semibold uppercase tracking-wider ${themeConfig.textMuted} block`}>
+            Themes (12)
           </label>
           <div className="grid grid-cols-2 gap-1">
             {Object.values(APP_THEMES).map((t) => {
@@ -707,7 +702,7 @@ export const SidebarMenu: React.FC<SidebarMenuProps> = ({
                   type="button"
                   onClick={() => onSelectTheme(t.id)}
                   title={t.description}
-                  className={`flex items-center justify-between gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors cursor-pointer whitespace-nowrap ${
+                  className={`flex items-center justify-between gap-1 px-2 py-1 rounded text-[11px] font-medium transition-colors cursor-pointer whitespace-nowrap ${
                     isSelected
                       ? `${themeConfig.accentBg} ${themeConfig.accent} font-semibold`
                       : `${themeConfig.textSecondary} hover:bg-slate-500/10`
@@ -715,12 +710,12 @@ export const SidebarMenu: React.FC<SidebarMenuProps> = ({
                 >
                   <div className="flex items-center gap-1.5 truncate">
                     <span
-                      className="w-2.5 h-2.5 rounded-full shrink-0"
+                      className="w-2 h-2 rounded-full shrink-0"
                       style={{ backgroundColor: t.icon }}
                     />
                     <span className="truncate">{t.name}</span>
                   </div>
-                  {isSelected && <Check className="w-3 h-3 shrink-0" />}
+                  {isSelected && <Check className="w-2.5 h-2.5 shrink-0" />}
                 </button>
               );
             })}

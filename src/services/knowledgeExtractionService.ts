@@ -1,161 +1,235 @@
 import { CrucialTermItem, KeyTakeawayItem, ParsedSegment } from '../types';
 
-// Curated dictionary of common abbreviations, acronyms, and crucial terms across tech, philosophy, business, and speeches
-const KNOWN_TERMS_DATABASE: Record<string, { fullForm?: string; category: CrucialTermItem['category']; definition: string; defaultImportance: CrucialTermItem['importance'] }> = {
-  'CEO': {
+// Curated dictionary of real abbreviations, organizations, and concepts explained in plain, natural human English
+const KNOWN_TERMS_DATABASE: Record<
+  string,
+  {
+    fullForm?: string;
+    category: CrucialTermItem['category'];
+    definition: string;
+    defaultImportance: CrucialTermItem['importance'];
+  }
+> = {
+  CEO: {
     fullForm: 'Chief Executive Officer',
     category: 'acronym',
-    definition: 'The highest-ranking executive manager in a company, responsible for making major corporate decisions and managing overall operations.',
+    definition: 'The top leader in charge of running a company and making its biggest day-to-day decisions.',
     defaultImportance: 'critical',
   },
-  'MAC': {
-    fullForm: 'Macintosh Computer',
+  MAC: {
+    fullForm: 'Apple Macintosh',
     category: 'entity',
-    definition: 'The revolutionary personal computer introduced by Apple in 1984, notable for being the first mass-market computer with a graphical user interface and beautiful typography.',
+    definition: 'The personal computer Apple launched in 1984—the first everyday computer with graphical windows, icons, and proportional fonts.',
     defaultImportance: 'critical',
   },
-  'NEXT': {
-    fullForm: 'NeXT Computer, Inc.',
+  NEXT: {
+    fullForm: 'NeXT Computer',
     category: 'entity',
-    definition: 'The computer and software workstation company founded by Steve Jobs in 1985 after leaving Apple. Its NeXTSTEP operating system became the technical foundation for modern macOS and iOS.',
+    definition: 'The computer company Steve Jobs started after leaving Apple in 1985. Apple later bought NeXT, and its software became the foundation for macOS and iOS.',
     defaultImportance: 'critical',
   },
-  'PIXAR': {
+  PIXAR: {
     fullForm: 'Pixar Animation Studios',
     category: 'entity',
-    definition: 'The pioneering computer animation film studio acquired by Steve Jobs in 1986 from Lucasfilm, which went on to produce Toy Story and define 3D computer animation.',
+    definition: 'The animation studio backed by Steve Jobs that created Toy Story, the world’s first computer-animated feature film.',
     defaultImportance: 'critical',
   },
-  'WOZ': {
-    fullForm: 'Steve Wozniak ("Woz")',
+  WOZ: {
+    fullForm: 'Steve Wozniak',
     category: 'entity',
-    definition: 'Co-founder of Apple and the brilliant electrical engineer who hand-built the Apple I and Apple II personal computers.',
+    definition: 'Co-founder of Apple and the engineer who designed and built the original Apple I and Apple II computers.',
     defaultImportance: 'high',
   },
-  'REED': {
+  REED: {
     fullForm: 'Reed College',
     category: 'entity',
-    definition: 'A selective liberal arts college in Portland, Oregon where Steve Jobs attended before dropping out and auditing calligraphy courses that inspired Mac typography.',
+    definition: 'A liberal arts college in Portland, Oregon, where Steve Jobs dropped in on the calligraphy classes that later inspired Mac typography.',
     defaultImportance: 'high',
   },
-  'STANFORD': {
+  STANFORD: {
     fullForm: 'Stanford University',
     category: 'entity',
-    definition: 'Leading private research university located near Silicon Valley, California, where famous commencement addresses and technological innovations originated.',
+    definition: 'A leading university in Silicon Valley, California, closely tied to the history of modern computing and startups.',
     defaultImportance: 'high',
   },
-  'GUI': {
+  GUI: {
     fullForm: 'Graphical User Interface',
     category: 'acronym',
-    definition: 'A visual way of interacting with a computer using windows, icons, and menus instead of purely text-based command line interfaces.',
+    definition: 'Visual menus, windows, and icons on a screen that let you click and point instead of typing text commands.',
     defaultImportance: 'high',
   },
-  'OS': {
+  OS: {
     fullForm: 'Operating System',
     category: 'acronym',
-    definition: 'The low-level system software that supports a computer\'s basic functions, such as scheduling tasks, executing applications, and controlling peripherals.',
+    definition: 'The core software (like macOS, Windows, iOS, or Android) that runs a computer or phone and manages all its apps.',
     defaultImportance: 'high',
   },
-  'API': {
+  API: {
     fullForm: 'Application Programming Interface',
     category: 'acronym',
-    definition: 'A set of protocols, routines, and tools for building software and enabling applications to exchange data seamlessly.',
+    definition: 'A bridge that lets two different software programs talk to each other and share information.',
     defaultImportance: 'high',
   },
-  'AI': {
+  AI: {
     fullForm: 'Artificial Intelligence',
     category: 'acronym',
-    definition: 'The simulation of human intelligence processes by computer systems, encompassing machine learning, NLP, and reasoning.',
+    definition: 'Software systems designed to recognize patterns, write, answer questions, or solve problems in ways that feel human.',
     defaultImportance: 'high',
   },
-  'LLM': {
+  LLM: {
     fullForm: 'Large Language Model',
     category: 'acronym',
-    definition: 'A deep neural network trained on massive corpora of text capable of understanding, summarizing, generating, and reasoning across human languages.',
+    definition: 'An AI system trained on huge amounts of writing so it can read, summarize, translate, and converse in natural language.',
     defaultImportance: 'high',
   },
-  'WWDC': {
-    fullForm: 'Worldwide Developers Conference',
+  GPU: {
+    fullForm: 'Graphics Processing Unit',
     category: 'acronym',
-    definition: 'Apple\'s annual conference where new software platforms, operating system updates, and developer technologies are unveiled.',
+    definition: 'A specialized computer chip originally built for 3D video games that is now used to train and run modern AI models.',
     defaultImportance: 'high',
   },
-  'VTT': {
-    fullForm: 'Web Video Text Tracks',
+  CPU: {
+    fullForm: 'Central Processing Unit',
     category: 'acronym',
-    definition: 'A standard W3C file format (.vtt) for displaying timed text captions, subtitles, and chapter markers in HTML5 video players.',
+    definition: 'The main processor chip inside a computer that handles everyday instructions and calculations.',
     defaultImportance: 'recommended',
   },
-  'SRT': {
-    fullForm: 'SubRip Subtitle Format',
+  DNA: {
+    fullForm: 'Deoxyribonucleic Acid',
     category: 'acronym',
-    definition: 'A widely used subtitle file format consisting of indexed sequential subtitles with start and end timestamps followed by text.',
+    definition: 'The molecule inside living cells that carries genetic instructions for how an organism grows and functions.',
+    defaultImportance: 'high',
+  },
+  RNA: {
+    fullForm: 'Ribonucleic Acid',
+    category: 'acronym',
+    definition: 'A molecule that helps cells read genetic instructions from DNA and build proteins.',
+    defaultImportance: 'high',
+  },
+  NASA: {
+    fullForm: 'National Aeronautics and Space Administration',
+    category: 'acronym',
+    definition: 'The United States government agency responsible for space exploration, satellites, and aviation research.',
+    defaultImportance: 'high',
+  },
+  MIT: {
+    fullForm: 'Massachusetts Institute of Technology',
+    category: 'acronym',
+    definition: 'A world-renowned science, engineering, and technology university in Cambridge, Massachusetts.',
+    defaultImportance: 'high',
+  },
+  PhD: {
+    fullForm: 'Doctor of Philosophy',
+    category: 'acronym',
+    definition: 'The highest university degree awarded after years of original research in a specific field.',
     defaultImportance: 'recommended',
   },
-  'JSON': {
-    fullForm: 'JavaScript Object Notation',
+  ROI: {
+    fullForm: 'Return on Investment',
     category: 'acronym',
-    definition: 'A standard text-based format for representing structured data based on JavaScript object syntax, used in web APIs and scraping feeds.',
+    definition: 'How much value, profit, or benefit you get back compared to the time or money you put in.',
+    defaultImportance: 'high',
+  },
+  KPI: {
+    fullForm: 'Key Performance Indicator',
+    category: 'acronym',
+    definition: 'A clear, measurable number used to track whether a project or team is actually hitting its goal.',
     defaultImportance: 'recommended',
   },
-  'TTML': {
-    fullForm: 'Timed Text Markup Language',
+  GDP: {
+    fullForm: 'Gross Domestic Product',
     category: 'acronym',
-    definition: 'An XML-based captioning standard developed by the W3C used for broadcast and streaming video subtitles.',
+    definition: 'The total value of all goods and services produced by a country in a year—used to measure the size of an economy.',
+    defaultImportance: 'high',
+  },
+  IPO: {
+    fullForm: 'Initial Public Offering',
+    category: 'acronym',
+    definition: 'The moment a private company sells shares of its stock to the general public on the stock market for the first time.',
+    defaultImportance: 'high',
+  },
+  VC: {
+    fullForm: 'Venture Capital',
+    category: 'acronym',
+    definition: 'Funding provided by investors to early-stage startups that have high growth potential.',
     defaultImportance: 'recommended',
   },
-  'CALLIGRAPHY': {
-    fullForm: 'Art of Beautiful Handwriting & Typography',
+  SaaS: {
+    fullForm: 'Software as a Service',
+    category: 'acronym',
+    definition: 'Software you use directly in your web browser (like Gmail, Notion, or Figma) instead of installing from a disc.',
+    defaultImportance: 'recommended',
+  },
+  URL: {
+    fullForm: 'Uniform Resource Locator',
+    category: 'acronym',
+    definition: 'A web address (like https://youtube.com) that points to a specific page or video on the internet.',
+    defaultImportance: 'recommended',
+  },
+  PDF: {
+    fullForm: 'Portable Document Format',
+    category: 'acronym',
+    definition: 'A universal file format that keeps fonts, images, and page layouts looking identical on any device.',
+    defaultImportance: 'recommended',
+  },
+  CALLIGRAPHY: {
+    fullForm: 'The Art of Hand-Lettering & Typography',
     category: 'core_concept',
-    definition: 'The visual art related to writing and letter styling. Steve Jobs audited calligraphy at Reed, directly informing proportional spacing and multiple font families on Mac.',
+    definition: 'The craft of drawing balanced, expressive letters by hand. Steve Jobs credited his college calligraphy class for giving the Macintosh its beautiful fonts.',
     defaultImportance: 'high',
   },
-  'DOGMA': {
-    fullForm: 'Living with Results of Others\' Thinking',
+  DOGMA: {
+    fullForm: "Living by Other People's Rules",
     category: 'core_concept',
-    definition: 'A principle or set of principles laid down by an authority as incontrovertibly true. In Jobs\' words: "Don\'t be trapped by dogma — which is living with the results of other people\'s thinking."',
+    definition: 'Following inherited rules or expectations without questioning them—what Steve Jobs called "living with the results of other people’s thinking."',
     defaultImportance: 'critical',
   },
-  'BEGINNER\'S MIND': {
-    fullForm: 'Shoshin (Zen Concept of Fresh Curiosity)',
+  "BEGINNER'S MIND": {
+    fullForm: 'Fresh Curiosity Without Ego',
     category: 'core_concept',
-    definition: 'Approaching life without rigid preconceptions, allowing one to enter creative periods with lightness and experimentation rather than the burden of existing success.',
+    definition: 'Approaching a problem with open curiosity and willingness to experiment, free from the pressure to look like an expert.',
     defaultImportance: 'critical',
   },
   'CONNECTING THE DOTS': {
-    fullForm: 'Retrospective Coherence Heuristic',
+    fullForm: 'How Past Experiences Make Sense Later',
     category: 'rule_of_thumb',
-    definition: 'The mental model that life events only reveal their purpose and synergy when evaluated looking backwards; requires trust and intuition in the present.',
+    definition: 'You rarely know in advance how a curiosity, class, or setback will pay off—you only see how the pieces fit together when you look back years later.',
     defaultImportance: 'critical',
-  }
+  },
 };
 
 /**
- * Deterministically extracts crucial terms, acronyms, and mental models from text without token wastage
+ * Extracts real, human-written key terms and big lessons from the summary and transcript—zero robotic filler.
  */
 export function extractCrucialKnowledge(
   summaryText: string,
   videoTitle: string = '',
   transcriptSegments: ParsedSegment[] = []
 ): { terms: CrucialTermItem[]; takeaways: KeyTakeawayItem[] } {
-  const combinedText = `${videoTitle}\n${summaryText}\n${transcriptSegments.slice(0, 50).map((s) => s.text).join(' ')}`;
+  const combinedText = `${videoTitle}\n${summaryText}\n${transcriptSegments
+    .slice(0, 80)
+    .map((s) => s.text)
+    .join(' ')}`;
   const upperCombined = combinedText.toUpperCase();
 
   const foundTerms: CrucialTermItem[] = [];
   const addedKeys = new Set<string>();
 
-  // 1. Scan against known dictionary
+  // 1. Scan against known dictionary of real acronyms, entities, and concepts
   for (const [key, meta] of Object.entries(KNOWN_TERMS_DATABASE)) {
-    const wordRegex = new RegExp(`\\b${key.replace(/'/g, "\\'")}\\b`, 'i');
+    const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const wordRegex = new RegExp(`\\b${escaped}\\b`, 'i');
     if (wordRegex.test(combinedText)) {
-      addedKeys.add(key);
+      addedKeys.add(key.toUpperCase());
 
-      // Extract a sentence mentioning it
       let context = '';
-      const sentences = combinedText.split(/(?<=[.?!])\s+/);
+      const sentences = combinedText
+        .replace(/[#>*_`]/g, '')
+        .split(/(?<=[.?!])\s+/);
       for (const s of sentences) {
-        if (wordRegex.test(s) && s.length > 20 && s.length < 220) {
-          context = s.trim();
+        const cleanS = s.replace(/\s+/g, ' ').trim();
+        if (wordRegex.test(cleanS) && cleanS.length > 25 && cleanS.length < 220) {
+          context = cleanS;
           break;
         }
       }
@@ -165,82 +239,87 @@ export function extractCrucialKnowledge(
         fullForm: meta.fullForm,
         category: meta.category,
         definition: meta.definition,
-        contextInVideo: context || `Referenced in the discourse regarding ${key.toLowerCase()}.`,
+        contextInVideo: context || undefined,
         importance: meta.defaultImportance,
-        tag: meta.category === 'acronym' ? 'Acronym' : meta.category === 'entity' ? 'Key Entity' : 'Mental Model',
+        tag:
+          meta.category === 'acronym'
+            ? 'Abbreviation'
+            : meta.category === 'entity'
+            ? 'Person / Place'
+            : 'Key Concept',
       });
     }
   }
 
-  // 2. Scan for capitalized acronyms in parentheses: e.g. "Artificial Intelligence (AI)" or "CEO"
-  const acronymRegex = /\b([A-Z]{2,6})\b/g;
-  let match;
-  while ((match = acronymRegex.exec(combinedText)) !== null) {
-    const rawAcronym = match[1];
-    if (addedKeys.has(rawAcronym)) continue;
-    if (['AND', 'THE', 'FOR', 'NOT', 'YOU', 'WAS', 'ALL', 'OUT', 'HAD', 'BUT', 'HIS', 'HER', 'WHY', 'HOW'].includes(rawAcronym)) continue;
+  // 2. Extract bolded terms with explanations directly from the summary markdown: e.g., "- **Term Name**: Explanation"
+  const bulletTermRegex = /^[-*]\s+\*\*([^*:]{2,42})\*\*\s*[:—-]\s*(.{20,260})$/gm;
+  let bulletMatch;
+  while ((bulletMatch = bulletTermRegex.exec(summaryText)) !== null) {
+    const rawTerm = bulletMatch[1].replace(/\[\d{1,2}:\d{2}(?::\d{2})?\]/g, '').trim();
+    const rawDef = bulletMatch[2].replace(/\*\*|__/g, '').trim();
+    if (!rawTerm || rawTerm.length < 3 || rawTerm.length > 38) continue;
+    if (
+      /^(the main|why it|the big|what it|how it|real-life|key points|the full|in plain|things you|habits to)/i.test(
+        rawTerm
+      )
+    ) {
+      continue;
+    }
+    const upperKey = rawTerm.toUpperCase();
+    if (addedKeys.has(upperKey)) continue;
+    addedKeys.add(upperKey);
 
-    addedKeys.add(rawAcronym);
     foundTerms.push({
-      term: rawAcronym,
-      fullForm: `Acronym (${rawAcronym})`,
-      category: 'acronym',
-      definition: `Specialized term or abbreviation identified in the discourse.`,
-      contextInVideo: `Used in the speech context for concise reference.`,
-      importance: 'recommended',
-      tag: 'Acronym',
+      term: rawTerm,
+      category: 'core_concept',
+      definition: rawDef,
+      importance: 'high',
+      tag: 'Key Idea',
     });
+    if (foundTerms.length >= 16) break;
   }
 
-  // 3. Extract Core Takeaways & Things to Keep in Mind
+  // 3. Extract Big Lessons & Ideas Worth Remembering
   const takeaways: KeyTakeawayItem[] = [];
 
-  // Extract from quotes or highlighted sentences in summary
-  const quoteMatches = summaryText.match(/"([^"]{20,180})"/g) || summaryText.match(/“([^”]{20,180})”/g) || [];
-  let takeawayIdx = 1;
-
-  for (const q of quoteMatches.slice(0, 3)) {
-    const cleanQuote = q.replace(/^["“]|["”]$/g, '').trim();
-    takeaways.push({
-      id: `takeaway-quote-${takeawayIdx++}`,
-      principle: cleanQuote.length > 45 ? `${cleanQuote.substring(0, 42)}...` : cleanQuote,
-      description: `Core quote emphasized in the material reflecting fundamental priorities and attitude.`,
-      quote: cleanQuote,
-      actionableLesson: `Remember this guidance during critical career and life crossroads.`,
-      category: 'mindset',
-    });
-  }
-
-  // Check for classic Steve Jobs Stanford pillars if relevant
   if (upperCombined.includes('CONNECT') && upperCombined.includes('DOTS')) {
-    takeaways.unshift({
+    takeaways.push({
       id: 'takeaway-dots',
       principle: 'You Can Only Connect the Dots Looking Backward',
-      description: 'You cannot predict how a random class, hobby, or detour will pay off in the future—you can only see how it all fits together when you look back later.',
-      quote: 'You can\'t connect the dots looking forward; you can only connect them looking backwards.',
-      actionableLesson: 'Follow your genuine curiosity and gut feelings right now, even if you cannot see how it fits on a resume yet.',
+      description:
+        'You cannot predict how a random class, hobby, or detour will pay off in the future—you only see how the pieces fit together when you look back years later.',
+      quote: "You can't connect the dots looking forward; you can only connect them looking backwards.",
+      actionableLesson:
+        'Follow your genuine curiosity right now, even if it does not look like a traditional career move yet.',
       category: 'decision_making',
     });
   }
 
-  if (upperCombined.includes('LOVE') && (upperCombined.includes('LOSS') || upperCombined.includes('FIRED') || upperCombined.includes('BEGINNER'))) {
-    takeaways.unshift({
+  if (
+    upperCombined.includes('LOVE') &&
+    (upperCombined.includes('LOSS') || upperCombined.includes('FIRED') || upperCombined.includes('BEGINNER'))
+  ) {
+    takeaways.push({
       id: 'takeaway-love',
-      principle: 'Do Work You Actually Love & Embrace Starting Fresh',
-      description: 'Getting knocked down or starting over can actually free you up. The pressure of "being successful" gets replaced by the freedom of being a curious beginner again.',
-      quote: 'The only way to do great work is to love what you do. If you haven\'t found it yet, keep looking. Don\'t settle.',
-      actionableLesson: 'Don\'t settle for work you don\'t care about. When plans fall apart, use that moment to build something better.',
+      principle: 'Do Work You Truly Care About & Welcome Fresh Starts',
+      description:
+        'Getting knocked down or starting over can free you from the pressure to look successful and bring back the excitement of being a curious beginner.',
+      quote: "The only way to do great work is to love what you do. If you haven't found it yet, keep looking. Don't settle.",
+      actionableLesson:
+        'Do not settle for work that leaves you cold. When a plan falls apart, treat it as room to build something better.',
       category: 'mindset',
     });
   }
 
   if (upperCombined.includes('DEATH') || upperCombined.includes('MORTALITY') || upperCombined.includes('CANCER')) {
-    takeaways.unshift({
+    takeaways.push({
       id: 'takeaway-death',
       principle: 'Remembering Life Is Short Clears Away the Noise',
-      description: 'Remembering that our time here is limited makes pride, fear of embarrassment, and other people\'s expectations fall away—leaving only what really matters to you.',
-      quote: 'Death is very likely the single best invention of Life. It is Life\'s change agent.',
-      actionableLesson: 'Ask yourself honestly: "If today were my last day, would I feel good about how I\'m spending my time?" If the answer is no for too many days in a row, change something.',
+      description:
+        "Realizing our time is limited strips away pride, fear of embarrassment, and other people's expectations—leaving only what actually matters to you.",
+      quote: "Your time is limited, so don't waste it living someone else's life.",
+      actionableLesson:
+        'Ask yourself honestly: "If today were my last day, would I feel good about how I am spending my time?" If the answer is no for weeks in a row, change course.',
       category: 'decision_making',
     });
   }
@@ -249,31 +328,47 @@ export function extractCrucialKnowledge(
     takeaways.push({
       id: 'takeaway-stay-hungry',
       principle: 'Stay Hungry, Stay Foolish',
-      description: 'Stay curious, keep learning, and never be afraid to look like a beginner or try new ideas when everyone else plays it safe.',
+      description:
+        'Stay curious, keep learning, and never be afraid to look like a beginner or try bold ideas when everyone else plays it safe.',
       quote: 'Stay Hungry. Stay Foolish.',
-      actionableLesson: 'Keep asking questions, try things outside your comfort zone, and never act like you have it all figured out.',
+      actionableLesson:
+        'Keep asking questions, try things outside your comfort zone, and never act like you have everything figured out.',
       category: 'execution',
     });
   }
 
-  // Fallback heuristic takeaways if none detected
+  // Extract additional real quotes from the summary with natural context
+  const quoteMatches =
+    summaryText.match(/"([^"]{25,200})"/g) || summaryText.match(/“([^”]{25,200})”/g) || [];
+  let takeawayIdx = 1;
+
+  for (const q of quoteMatches) {
+    if (takeaways.length >= 6) break;
+    const cleanQuote = q.replace(/^["“]|["”]$/g, '').trim();
+    if (takeaways.some((t) => t.quote && t.quote.toLowerCase().includes(cleanQuote.slice(0, 25).toLowerCase()))) {
+      continue;
+    }
+    const words = cleanQuote.split(/\s+/);
+    const shortTitle = words.length > 8 ? `${words.slice(0, 8).join(' ')}...` : cleanQuote;
+    takeaways.push({
+      id: `takeaway-quote-${takeawayIdx++}`,
+      principle: shortTitle,
+      description: `A standout moment from "${videoTitle || 'this video'}" capturing the speaker's core perspective in their own words.`,
+      quote: cleanQuote,
+      actionableLesson: 'Keep this perspective in mind when applying the lessons from this video to your own work.',
+      category: 'mindset',
+    });
+  }
+
   if (takeaways.length === 0) {
-    takeaways.push(
-      {
-        id: 'takeaway-1',
-        principle: 'Focus on What Really Matters',
-        description: 'Cut through the background noise and pay attention to the few core ideas that actually make a difference.',
-        actionableLesson: 'Pick one or two practical ideas from this video that you can realistically try out this week.',
-        category: 'execution',
-      },
-      {
-        id: 'takeaway-2',
-        principle: 'Understand the Key Words in Plain English',
-        description: 'Once you know what the buzzwords and abbreviations mean in everyday language, the whole topic becomes easy to follow.',
-        actionableLesson: 'Take a quick look through the word list below so none of the technical terms get in your way.',
-        category: 'craft',
-      }
-    );
+    takeaways.push({
+      id: 'takeaway-1',
+      principle: 'Focus on the Core Message',
+      description:
+        'Cut through the background details and hold onto the one or two practical ideas from this talk that you can actually use.',
+      actionableLesson: 'Pick one concrete idea from the summary and test it out in your routine this week.',
+      category: 'execution',
+    });
   }
 
   return {
@@ -283,32 +378,29 @@ export function extractCrucialKnowledge(
 }
 
 /**
- * Formats terms and takeaways as Markdown to append to the summary
+ * Formats terms and takeaways as clean, human-readable Markdown to append to the summary
  */
 export function formatKnowledgeAsMarkdown(terms: CrucialTermItem[], takeaways: KeyTakeawayItem[]): string {
-  let md = `\n\n---\n\n## Big Lessons & Helpful Words\n\n`;
+  let md = `\n\n---\n\n## Key Lessons & Terms Explained\n\n`;
 
   if (takeaways.length > 0) {
-    md += `### Lessons Worth Remembering\n\n`;
+    md += `### Big Lessons Worth Remembering\n\n`;
     for (const t of takeaways) {
       md += `* **${t.principle}**\n`;
-      md += `  * *What it means:* ${t.description}\n`;
+      md += `  * ${t.description}\n`;
       if (t.quote) {
-        md += `  * *Memorable quote:* > "${t.quote}"\n`;
+        md += `  * *Quote:* "${t.quote}"\n`;
       }
-      md += `  * *How to use it in real life:* ${t.actionableLesson}\n\n`;
+      md += `  * *How to use it:* ${t.actionableLesson}\n\n`;
     }
   }
 
   if (terms.length > 0) {
-    md += `### Words & Jargon Explained Simply\n\n`;
-    md += `| Word / Term | Stands For | Topic | Plain-English Meaning |\n`;
-    md += `| :--- | :--- | :--- | :--- |\n`;
-    for (const term of terms) {
-      const full = term.fullForm ? `**${term.fullForm}**` : '—';
-      md += `| \`${term.term}\` | ${full} | ${term.tag || term.category} | ${term.definition} |\n`;
+    md += `### Key Words & Abbreviations\n\n`;
+    for (const item of terms) {
+      const fullFormStr = item.fullForm ? ` (${item.fullForm})` : '';
+      md += `* **${item.term}${fullFormStr}**: ${item.definition}\n`;
     }
-    md += `\n`;
   }
 
   return md;

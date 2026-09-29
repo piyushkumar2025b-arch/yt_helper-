@@ -461,15 +461,15 @@ export const ResearchVisualsPanel: React.FC<ResearchVisualsPanelProps> = ({
     ytResults.length;
 
   return (
-    <div className="w-full space-y-10">
+    <div className="w-full space-y-6">
       {/* Unboxed Header and Search Controls */}
-      <div className={`pb-5 border-b ${themeConfig.borderLight} space-y-5`}>
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div className="space-y-1">
-            <h2 className={`text-lg sm:text-xl font-bold tracking-tight ${themeConfig.textPrimary}`}>
-              Explore Related Videos, Books, Articles, Podcasts &amp; Discussions
+      <div className={`pb-3 border-b ${themeConfig.borderLight} space-y-3`}>
+        <div className="flex flex-wrap items-center justify-between gap-2.5">
+          <div className="space-y-0.5">
+            <h2 className={`text-sm sm:text-base font-bold tracking-tight ${themeConfig.textPrimary}`}>
+              Explore Videos, Books, Articles, Podcasts &amp; Discussions
             </h2>
-            <p className={`text-xs ${themeConfig.textMuted}`}>
+            <p className={`text-[11px] ${themeConfig.textMuted}`}>
               Discover related YouTube videos, books, articles, community discussions, podcasts, research papers, and open-source projects on this topic.
             </p>
           </div>
@@ -482,18 +482,18 @@ export const ResearchVisualsPanel: React.FC<ResearchVisualsPanelProps> = ({
             <button
               type="button"
               onClick={handleAppendAll}
-              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-md ${themeConfig.primaryButton} text-xs font-semibold cursor-pointer transition-colors whitespace-nowrap`}
+              className={`inline-flex items-center gap-1 px-2.5 py-1 rounded ${themeConfig.primaryButton} text-[11px] font-semibold cursor-pointer transition-colors whitespace-nowrap`}
             >
-              <Layers className="w-3.5 h-3.5" />
-              <span>Add Links to Summary ({totalCount - ytResults.length})</span>
+              <Layers className="w-3 h-3" />
+              <span>+ Add All to Summary ({totalCount - ytResults.length})</span>
             </button>
           )}
         </div>
 
         {/* Topic Suggestions */}
         {smartTerms.length > 0 && (
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className={`text-xs ${themeConfig.textMuted}`}>Topics:</span>
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className={`text-[11px] ${themeConfig.textMuted}`}>Topics:</span>
             {smartTerms.map((term, idx) => {
               const isActive = searchQuery.toLowerCase() === term.toLowerCase();
               return (
@@ -501,10 +501,10 @@ export const ResearchVisualsPanel: React.FC<ResearchVisualsPanelProps> = ({
                   key={idx}
                   type="button"
                   onClick={() => handleSelectChip(term)}
-                  className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer truncate max-w-[240px] ${
+                  className={`px-2 py-0.5 rounded text-[11px] font-medium transition-colors cursor-pointer truncate max-w-[220px] ${
                     isActive
                       ? `${themeConfig.accentBg} ${themeConfig.accent} font-semibold`
-                      : `${themeConfig.textSecondary} hover:${themeConfig.textPrimary} hover:bg-slate-500/10`
+                      : `${themeConfig.textSecondary} hover:${themeConfig.textPrimary} bg-slate-500/10 hover:bg-slate-500/15`
                   }`}
                 >
                   {term}
@@ -515,38 +515,38 @@ export const ResearchVisualsPanel: React.FC<ResearchVisualsPanelProps> = ({
         )}
 
         {/* Search Input & Tabs */}
-        <div className="flex flex-col gap-4">
-          <form onSubmit={handleSearchSubmit} className="flex items-center gap-2 w-full max-w-2xl">
+        <div className="flex flex-col gap-2.5">
+          <form onSubmit={handleSearchSubmit} className="flex items-center gap-1.5 w-full max-w-xl">
             <div className="relative flex-1">
-              <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 opacity-40 pointer-events-none" />
+              <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 opacity-40 pointer-events-none" />
               <input
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search related videos, books, articles, podcasts, Reddit threads, or code..."
-                className={`w-full pl-10 pr-4 py-2 text-xs sm:text-sm rounded-md bg-slate-500/10 ${themeConfig.textPrimary} placeholder:opacity-40 focus:outline-none`}
+                placeholder="Search videos, books, articles, podcasts, Reddit threads, or code..."
+                className={`w-full pl-8 pr-3 py-1.5 text-xs rounded bg-slate-500/10 ${themeConfig.textPrimary} placeholder:opacity-40 focus:outline-none`}
               />
             </div>
 
             <button
               type="submit"
               disabled={isLoading || !searchQuery.trim()}
-              className={`px-4 py-2 rounded-md text-xs sm:text-sm font-semibold cursor-pointer transition-all flex items-center gap-1.5 whitespace-nowrap ${
+              className={`px-3 py-1.5 rounded text-xs font-semibold cursor-pointer transition-all inline-flex items-center gap-1 whitespace-nowrap ${
                 isLoading || !searchQuery.trim()
                   ? 'opacity-50 cursor-not-allowed bg-slate-800 text-slate-400'
                   : `${themeConfig.primaryButton}`
               }`}
             >
-              {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
-              <span>Search Everything</span>
+              {isLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
+              <span>Search</span>
             </button>
           </form>
 
-          <div className="flex items-center gap-1.5 flex-wrap">
+          <div className="flex items-center gap-1 flex-wrap">
             <button
               type="button"
               onClick={() => setActiveTab('all')}
-              className={`px-3 py-1.5 rounded-md text-xs font-medium cursor-pointer transition-colors whitespace-nowrap ${
+              className={`px-2 py-0.5 rounded text-[11px] font-medium cursor-pointer transition-colors whitespace-nowrap ${
                 activeTab === 'all'
                   ? `${themeConfig.accentBg} ${themeConfig.accent} font-semibold`
                   : `${themeConfig.textMuted} hover:${themeConfig.textPrimary}`

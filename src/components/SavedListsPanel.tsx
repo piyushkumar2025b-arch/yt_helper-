@@ -382,19 +382,19 @@ export const SavedListsPanel: React.FC<SavedListsPanelProps> = ({
           </div>
 
           {/* Firebase Account & Cloud Sync Controls */}
-          <div className="flex items-center gap-2.5 flex-wrap">
+          <div className="flex items-center gap-1.5 flex-wrap">
             {user ? (
-              <div className="flex items-center gap-2.5">
-                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-emerald-500/10 text-emerald-400">
-                  <Cloud className="w-3.5 h-3.5" />
-                  <span>Synced to Firebase ({user.displayName || user.email})</span>
+              <div className="flex items-center gap-1.5">
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-emerald-500/10 text-emerald-400">
+                  <Cloud className="w-3 h-3" />
+                  <span>Synced ({user.displayName || user.email})</span>
                 </span>
                 <button
                   type="button"
                   onClick={handleSignOut}
-                  className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium ${themeConfig.textSecondary} hover:${themeConfig.textPrimary} hover:bg-slate-500/10 cursor-pointer transition-colors`}
+                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium ${themeConfig.textSecondary} hover:${themeConfig.textPrimary} hover:bg-slate-500/10 cursor-pointer transition-colors`}
                 >
-                  <LogOut className="w-3.5 h-3.5" />
+                  <LogOut className="w-3 h-3" />
                   <span>Sign Out</span>
                 </button>
               </div>
@@ -402,10 +402,10 @@ export const SavedListsPanel: React.FC<SavedListsPanelProps> = ({
               <button
                 type="button"
                 onClick={handleSignIn}
-                className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-md text-xs font-semibold ${themeConfig.primaryButton} cursor-pointer transition-colors`}
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-semibold ${themeConfig.primaryButton} cursor-pointer transition-colors`}
               >
-                <LogIn className="w-3.5 h-3.5" />
-                <span>Sign in with Google to Sync Lists to Firebase</span>
+                <LogIn className="w-3 h-3" />
+                <span>Sign in with Google to Sync Lists</span>
               </button>
             )}
           </div>
@@ -423,8 +423,8 @@ export const SavedListsPanel: React.FC<SavedListsPanelProps> = ({
         )}
 
         {/* List Selector Tabs + New List Button */}
-        <div className="flex items-center justify-between gap-3 flex-wrap pt-1">
-          <div className="flex items-center gap-1.5 flex-wrap">
+        <div className="flex items-center justify-between gap-2 flex-wrap pt-0.5">
+          <div className="flex items-center gap-1 flex-wrap">
             {lists.map((list) => {
               const isSelected = list.id === activeList?.id;
               return (
@@ -432,13 +432,13 @@ export const SavedListsPanel: React.FC<SavedListsPanelProps> = ({
                   key={list.id}
                   type="button"
                   onClick={() => setSelectedListId(list.id)}
-                  className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors cursor-pointer flex items-center gap-1.5 ${
+                  className={`px-2 py-0.5 rounded text-[11px] font-medium transition-colors cursor-pointer flex items-center gap-1 ${
                     isSelected
                       ? `${themeConfig.accentBg} ${themeConfig.accent} font-semibold`
                       : `${themeConfig.textSecondary} hover:${themeConfig.textPrimary} hover:bg-slate-500/10`
                   }`}
                 >
-                  <Bookmark className="w-3.5 h-3.5 opacity-75" />
+                  <Bookmark className="w-3 h-3 opacity-75" />
                   <span>{list.name}</span>
                 </button>
               );
@@ -447,10 +447,10 @@ export const SavedListsPanel: React.FC<SavedListsPanelProps> = ({
             <button
               type="button"
               onClick={() => setIsCreatingList(!isCreatingList)}
-              className={`px-3 py-1.5 rounded-md text-xs font-semibold cursor-pointer transition-colors flex items-center gap-1.5 ${themeConfig.textSecondary} hover:${themeConfig.textPrimary} bg-slate-500/10 hover:bg-slate-500/20`}
+              className={`px-2 py-0.5 rounded text-[11px] font-semibold cursor-pointer transition-colors flex items-center gap-1 ${themeConfig.textSecondary} hover:${themeConfig.textPrimary} bg-slate-500/10 hover:bg-slate-500/20`}
             >
-              <FolderPlus className="w-3.5 h-3.5 text-indigo-400" />
-              <span>+ Create New List</span>
+              <FolderPlus className="w-3 h-3 text-indigo-400" />
+              <span>+ New List</span>
             </button>
           </div>
 
@@ -459,13 +459,13 @@ export const SavedListsPanel: React.FC<SavedListsPanelProps> = ({
             <button
               type="button"
               onClick={handleSaveCurrentVideoToList}
-              className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-md text-xs font-semibold ${themeConfig.primaryButton} cursor-pointer transition-colors`}
+              className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded text-[11px] font-semibold ${themeConfig.primaryButton} cursor-pointer transition-colors`}
             >
-              {savedCurrentVideo ? <Check className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
+              {savedCurrentVideo ? <Check className="w-3 h-3" /> : <Plus className="w-3 h-3" />}
               <span>
                 {savedCurrentVideo
                   ? `Saved to "${activeList.name}"`
-                  : `Save Current Video & Summary to "${activeList.name}"`}
+                  : `Save Video to "${activeList.name}"`}
               </span>
             </button>
           )}

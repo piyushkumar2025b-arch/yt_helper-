@@ -256,32 +256,32 @@ export const CrucialKnowledgePanel: React.FC<CrucialKnowledgePanelProps> = ({
   const currentCard = flashcards[cardIndex] || flashcards[0];
 
   return (
-    <div className="w-full space-y-10">
+    <div className="w-full space-y-6">
       {/* Clean Unboxed Header & Filter Bar */}
-      <div className={`pb-5 border-b ${themeConfig.borderLight} space-y-5`}>
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div className="space-y-1">
-            <h2 className={`text-lg sm:text-xl font-bold tracking-tight ${themeConfig.textPrimary}`}>
+      <div className={`pb-3 border-b ${themeConfig.borderLight} space-y-3`}>
+        <div className="flex flex-wrap items-center justify-between gap-2.5">
+          <div className="space-y-0.5">
+            <h2 className={`text-sm sm:text-base font-bold tracking-tight ${themeConfig.textPrimary}`}>
               Key Lessons, Helpful Words &amp; Flashcards
             </h2>
-            <div className={`flex items-center gap-2 text-xs ${themeConfig.textMuted} tabular-nums flex-wrap`}>
+            <div className={`flex items-center gap-1.5 text-[11px] ${themeConfig.textMuted} tabular-nums flex-wrap`}>
               <span>{takeaways.length} big lessons</span>
               <span aria-hidden="true">·</span>
               <span>{terms.filter((t) => t.category === 'acronym').length} abbreviations</span>
               <span aria-hidden="true">·</span>
               <span>{terms.filter((t) => t.category !== 'acronym').length} helpful terms</span>
               <span aria-hidden="true">·</span>
-              <span>Instant Word &amp; Wikipedia Lookup</span>
+              <span>Plain-English Word Lookup</span>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-1.5 flex-wrap">
             {/* Mode Switcher */}
-            <div className="flex items-center gap-1 bg-slate-500/10 p-1 rounded-lg">
+            <div className="flex items-center gap-0.5 bg-slate-500/10 p-0.5 rounded">
               <button
                 type="button"
                 onClick={() => setViewMode('list')}
-                className={`px-2.5 py-1 rounded-md text-xs font-medium cursor-pointer transition-colors ${
+                className={`px-2 py-0.5 rounded text-[11px] font-medium cursor-pointer transition-colors ${
                   viewMode === 'list'
                     ? `${themeConfig.accentBg} ${themeConfig.accent} font-semibold`
                     : `${themeConfig.textMuted} hover:${themeConfig.textPrimary}`
@@ -295,13 +295,13 @@ export const CrucialKnowledgePanel: React.FC<CrucialKnowledgePanelProps> = ({
                   setViewMode('flashcards');
                   setIsFlipped(false);
                 }}
-                className={`px-2.5 py-1 rounded-md text-xs font-medium cursor-pointer transition-colors flex items-center gap-1 ${
+                className={`px-2 py-0.5 rounded text-[11px] font-medium cursor-pointer transition-colors flex items-center gap-1 ${
                   viewMode === 'flashcards'
                     ? `${themeConfig.accentBg} ${themeConfig.accent} font-semibold`
                     : `${themeConfig.textMuted} hover:${themeConfig.textPrimary}`
                 }`}
               >
-                <Layers className="w-3.5 h-3.5" />
+                <Layers className="w-3 h-3" />
                 <span>Flashcards ({flashcards.length})</span>
               </button>
               <button
@@ -312,41 +312,41 @@ export const CrucialKnowledgePanel: React.FC<CrucialKnowledgePanelProps> = ({
                     performDictionaryLookup(terms[0].fullForm || terms[0].term);
                   }
                 }}
-                className={`px-2.5 py-1 rounded-md text-xs font-medium cursor-pointer transition-colors flex items-center gap-1 ${
+                className={`px-2 py-0.5 rounded text-[11px] font-medium cursor-pointer transition-colors flex items-center gap-1 ${
                   viewMode === 'dictionary'
                     ? `${themeConfig.accentBg} ${themeConfig.accent} font-semibold`
                     : `${themeConfig.textMuted} hover:${themeConfig.textPrimary}`
                 }`}
               >
-                <Globe className="w-3.5 h-3.5" />
-                <span>Look Up Any Word</span>
+                <Globe className="w-3 h-3" />
+                <span>Word Lookup</span>
               </button>
             </div>
 
             <button
               type="button"
               onClick={handleCopyAll}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md ${themeConfig.textSecondary} hover:${themeConfig.textPrimary} hover:bg-slate-500/10 text-xs font-medium cursor-pointer transition-colors whitespace-nowrap`}
+              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded ${themeConfig.textSecondary} hover:${themeConfig.textPrimary} hover:bg-slate-500/10 text-[11px] font-medium cursor-pointer transition-colors whitespace-nowrap`}
             >
-              {copiedAll ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+              {copiedAll ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
               <span>{copiedAll ? 'Copied' : 'Copy All'}</span>
             </button>
 
             <button
               type="button"
               onClick={handleAppendAll}
-              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-md ${themeConfig.primaryButton} text-xs font-semibold cursor-pointer transition-colors whitespace-nowrap`}
+              className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded ${themeConfig.primaryButton} text-[11px] font-semibold cursor-pointer transition-colors whitespace-nowrap`}
             >
-              {appendedAll ? <Check className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
-              <span>{appendedAll ? 'Added to Summary' : 'Add All to Summary'}</span>
+              {appendedAll ? <Check className="w-3 h-3" /> : <Plus className="w-3 h-3" />}
+              <span>{appendedAll ? 'Added' : '+ Add All'}</span>
             </button>
           </div>
         </div>
 
         {/* Filter Controls & Search when in List Mode */}
         {viewMode === 'list' && (
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
-            <div className="flex items-center gap-1.5 flex-wrap">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2">
+            <div className="flex items-center gap-1 flex-wrap">
               {[
                 { id: 'all', label: `All (${takeaways.length + terms.length})` },
                 { id: 'takeaways', label: `Big Lessons (${takeaways.length})` },
@@ -357,7 +357,7 @@ export const CrucialKnowledgePanel: React.FC<CrucialKnowledgePanelProps> = ({
                   key={tab.id}
                   type="button"
                   onClick={() => setFilterType(tab.id as any)}
-                  className={`px-3 py-1.5 rounded-md text-xs font-medium cursor-pointer transition-colors whitespace-nowrap ${
+                  className={`px-2 py-0.5 rounded text-[11px] font-medium cursor-pointer transition-colors whitespace-nowrap ${
                     filterType === tab.id
                       ? `${themeConfig.accentBg} ${themeConfig.accent} font-semibold`
                       : `${themeConfig.textMuted} hover:${themeConfig.textPrimary} hover:bg-slate-500/10`
@@ -368,14 +368,14 @@ export const CrucialKnowledgePanel: React.FC<CrucialKnowledgePanelProps> = ({
               ))}
             </div>
 
-            <div className="relative min-w-[220px] sm:max-w-xs">
-              <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 opacity-40 pointer-events-none" />
+            <div className="relative min-w-[200px] sm:max-w-xs">
+              <Search className="w-3 h-3 absolute left-2.5 top-1/2 -translate-y-1/2 opacity-40 pointer-events-none" />
               <input
                 type="text"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="Filter terms & principles..."
-                className={`w-full pl-8 pr-3 py-1.5 text-xs rounded-md bg-slate-500/10 ${themeConfig.textPrimary} placeholder:opacity-40 focus:outline-none`}
+                placeholder="Filter lessons & words..."
+                className={`w-full pl-7 pr-2.5 py-1 text-[11px] rounded bg-slate-500/10 ${themeConfig.textPrimary} placeholder:opacity-40 focus:outline-none`}
               />
             </div>
           </div>
@@ -384,12 +384,12 @@ export const CrucialKnowledgePanel: React.FC<CrucialKnowledgePanelProps> = ({
 
       {/* MODE 2: INTERACTIVE FLASHCARDS DECK */}
       {viewMode === 'flashcards' && currentCard && (
-        <div className="max-w-3xl mx-auto py-4 space-y-6">
-          <div className="flex items-center justify-between text-xs">
+        <div className="max-w-3xl mx-auto py-3 space-y-4">
+          <div className="flex items-center justify-between text-[11px]">
             <span className={`${themeConfig.textMuted} tabular-nums`}>
               Card {cardIndex + 1} of {flashcards.length} · {masteredIds.size} Mastered
             </span>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-1.5">
               <button
                 type="button"
                 onClick={() =>
@@ -400,14 +400,14 @@ export const CrucialKnowledgePanel: React.FC<CrucialKnowledgePanelProps> = ({
                       : `${currentCard.frontTitle}. ${currentCard.frontSubtitle || ''}`
                   )
                 }
-                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md font-medium cursor-pointer transition-colors ${
+                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded font-medium cursor-pointer transition-colors ${
                   speakingItem === currentCard.id
                     ? 'bg-amber-500 text-slate-950 font-semibold'
                     : `${themeConfig.textSecondary} hover:${themeConfig.textPrimary} bg-slate-500/10`
                 }`}
               >
-                <Volume2 className="w-3.5 h-3.5" />
-                <span>Read Card Aloud</span>
+                <Volume2 className="w-3 h-3" />
+                <span>Read Card</span>
               </button>
               <button
                 type="button"
@@ -419,58 +419,58 @@ export const CrucialKnowledgePanel: React.FC<CrucialKnowledgePanelProps> = ({
                     return next;
                   });
                 }}
-                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md font-medium cursor-pointer transition-colors ${
+                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded font-medium cursor-pointer transition-colors ${
                   masteredIds.has(currentCard.id)
                     ? 'text-emerald-400 bg-emerald-500/15 font-semibold'
                     : `${themeConfig.textSecondary} hover:${themeConfig.textPrimary} bg-slate-500/10`
                 }`}
               >
-                <Check className="w-3.5 h-3.5" />
-                <span>{masteredIds.has(currentCard.id) ? 'Mastered' : 'Mark Mastered'}</span>
+                <Check className="w-3 h-3" />
+                <span>{masteredIds.has(currentCard.id) ? 'Mastered' : 'Got It'}</span>
               </button>
             </div>
           </div>
 
           <div
             onClick={() => setIsFlipped((prev) => !prev)}
-            className={`min-h-[280px] p-8 sm:p-10 rounded-xl border ${themeConfig.border} ${themeConfig.cardBg} flex flex-col justify-between cursor-pointer select-none transition-all hover:border-indigo-500/50`}
+            className={`min-h-[220px] p-6 sm:p-8 rounded-xl border ${themeConfig.border} ${themeConfig.cardBg} flex flex-col justify-between cursor-pointer select-none transition-all hover:border-indigo-500/50`}
           >
-            <div className="flex items-center justify-between text-xs">
+            <div className="flex items-center justify-between text-[11px]">
               <span className="text-indigo-400 font-semibold uppercase tracking-wider">
                 {currentCard.type}
               </span>
               <span className={themeConfig.textMuted}>
-                {isFlipped ? 'Answer / Definition (Click to flip)' : 'Prompt / Term (Click to flip)'}
+                {isFlipped ? 'Explanation (Click to flip)' : 'Question / Term (Click to flip)'}
               </span>
             </div>
 
             {!isFlipped ? (
-              <div className="py-8 space-y-3 text-center">
-                <h3 className={`text-xl sm:text-2xl font-bold ${themeConfig.textPrimary}`}>
+              <div className="py-6 space-y-2 text-center">
+                <h3 className={`text-lg sm:text-xl font-bold ${themeConfig.textPrimary}`}>
                   {currentCard.frontTitle}
                 </h3>
                 {currentCard.frontSubtitle && (
-                  <p className={`text-sm ${themeConfig.textSecondary} max-w-xl mx-auto`}>
+                  <p className={`text-xs sm:text-sm ${themeConfig.textSecondary} max-w-xl mx-auto`}>
                     {currentCard.frontSubtitle}
                   </p>
                 )}
               </div>
             ) : (
-              <div className="py-6 space-y-4">
-                <p className={`text-base sm:text-lg leading-relaxed ${themeConfig.textPrimary}`}>
+              <div className="py-5 space-y-3">
+                <p className={`text-sm sm:text-base leading-relaxed ${themeConfig.textPrimary}`}>
                   {currentCard.backMain}
                 </p>
                 {currentCard.backExtra && (
-                  <p className="text-xs sm:text-sm text-amber-400 font-medium pt-2 border-t border-slate-500/20">
+                  <p className="text-xs text-amber-400 font-medium pt-2 border-t border-slate-500/20">
                     {currentCard.backExtra}
                   </p>
                 )}
               </div>
             )}
 
-            <div className="flex items-center justify-between pt-4 border-t border-slate-500/15 text-xs">
+            <div className="flex items-center justify-between pt-3 border-t border-slate-500/15 text-[11px]">
               <span className={themeConfig.textMuted}>Click anywhere on card to flip</span>
-              <RotateCcw className="w-3.5 h-3.5 opacity-50" />
+              <RotateCcw className="w-3 h-3 opacity-50" />
             </div>
           </div>
 
@@ -481,16 +481,16 @@ export const CrucialKnowledgePanel: React.FC<CrucialKnowledgePanelProps> = ({
                 setIsFlipped(false);
                 setCardIndex((prev) => (prev > 0 ? prev - 1 : flashcards.length - 1));
               }}
-              className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold cursor-pointer ${themeConfig.textSecondary} hover:${themeConfig.textPrimary} bg-slate-500/10`}
+              className={`inline-flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-semibold cursor-pointer ${themeConfig.textSecondary} hover:${themeConfig.textPrimary} bg-slate-500/10`}
             >
-              <ChevronLeft className="w-4 h-4" />
-              <span>Previous Card</span>
+              <ChevronLeft className="w-3.5 h-3.5" />
+              <span>Previous</span>
             </button>
 
             <button
               type="button"
               onClick={() => setIsFlipped((prev) => !prev)}
-              className={`px-5 py-2 rounded-lg text-xs font-semibold cursor-pointer ${themeConfig.primaryButton}`}
+              className={`px-3 py-1 rounded text-[11px] font-semibold cursor-pointer ${themeConfig.primaryButton}`}
             >
               {isFlipped ? 'Show Front' : 'Reveal Answer'}
             </button>
@@ -501,55 +501,55 @@ export const CrucialKnowledgePanel: React.FC<CrucialKnowledgePanelProps> = ({
                 setIsFlipped(false);
                 setCardIndex((prev) => (prev + 1) % flashcards.length);
               }}
-              className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold cursor-pointer ${themeConfig.textSecondary} hover:${themeConfig.textPrimary} bg-slate-500/10`}
+              className={`inline-flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-semibold cursor-pointer ${themeConfig.textSecondary} hover:${themeConfig.textPrimary} bg-slate-500/10`}
             >
-              <span>Next Card</span>
-              <ChevronRight className="w-4 h-4" />
+              <span>Next</span>
+              <ChevronRight className="w-3.5 h-3.5" />
             </button>
           </div>
         </div>
       )}
 
-      {/* MODE 3: LIVE DICTIONARY, DATAMUSE SEMANTIC GRAPH & WIKIDATA KNOWLEDGE GRAPH */}
+      {/* MODE 3: WORD & CONCEPT LOOKUP */}
       {viewMode === 'dictionary' && (
-        <div className="space-y-8">
+        <div className="space-y-6">
           <form
             onSubmit={(e) => {
               e.preventDefault();
               performDictionaryLookup(dictQuery);
             }}
-            className="flex items-center gap-2 max-w-2xl"
+            className="flex items-center gap-1.5 max-w-xl"
           >
             <div className="relative flex-1">
-              <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 opacity-40 pointer-events-none" />
+              <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 opacity-40 pointer-events-none" />
               <input
                 type="text"
                 value={dictQuery}
                 onChange={(e) => setDictQuery(e.target.value)}
-                placeholder="Look up any term, entity, or concept in Free Dictionary, Datamuse & Wikidata..."
-                className={`w-full pl-10 pr-4 py-2 text-xs sm:text-sm rounded-md bg-slate-500/10 ${themeConfig.textPrimary} placeholder:opacity-40 focus:outline-none`}
+                placeholder="Type any word, person, or topic to look up..."
+                className={`w-full pl-8 pr-3 py-1.5 text-xs rounded bg-slate-500/10 ${themeConfig.textPrimary} placeholder:opacity-40 focus:outline-none`}
               />
             </div>
             <button
               type="submit"
               disabled={isDictLoading || !dictQuery.trim()}
-              className={`px-4 py-2 rounded-md text-xs sm:text-sm font-semibold cursor-pointer ${themeConfig.primaryButton} flex items-center gap-1.5`}
+              className={`px-3 py-1.5 rounded text-xs font-semibold cursor-pointer ${themeConfig.primaryButton} flex items-center gap-1`}
             >
-              {isDictLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Globe className="w-4 h-4" />}
-              <span>Lookup API</span>
+              {isDictLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Globe className="w-3.5 h-3.5" />}
+              <span>Look Up</span>
             </button>
           </form>
 
           {/* Quick Term Chips from Glossary */}
           {terms.length > 0 && (
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className={`text-xs ${themeConfig.textMuted}`}>Glossary Terms:</span>
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className={`text-[11px] ${themeConfig.textMuted}`}>Words from video:</span>
               {terms.slice(0, 12).map((t, idx) => (
                 <button
                   key={idx}
                   type="button"
                   onClick={() => performDictionaryLookup(t.fullForm || t.term)}
-                  className={`px-2.5 py-1 rounded-md text-xs font-medium cursor-pointer transition-colors ${
+                  className={`px-2 py-0.5 rounded text-[11px] font-medium cursor-pointer transition-colors ${
                     dictQuery.toLowerCase() === (t.fullForm || t.term).toLowerCase()
                       ? `${themeConfig.accentBg} ${themeConfig.accent} font-semibold`
                       : `${themeConfig.textSecondary} hover:${themeConfig.textPrimary} bg-slate-500/10`
@@ -562,10 +562,10 @@ export const CrucialKnowledgePanel: React.FC<CrucialKnowledgePanelProps> = ({
           )}
 
           {isDictLoading && (
-            <div className="py-12 text-center space-y-2">
-              <Loader2 className="w-6 h-6 animate-spin mx-auto text-indigo-400" />
+            <div className="py-10 text-center space-y-2">
+              <Loader2 className="w-5 h-5 animate-spin mx-auto text-indigo-400" />
               <p className={`text-xs ${themeConfig.textMuted}`}>
-                Querying Free Dictionary API, Datamuse Semantic Graph, Wikidata &amp; Wikipedia REST v1...
+                Looking up plain-English definitions and background info...
               </p>
             </div>
           )}
@@ -575,33 +575,29 @@ export const CrucialKnowledgePanel: React.FC<CrucialKnowledgePanelProps> = ({
           )}
 
           {dictResult && !isDictLoading && (
-            <div className="space-y-8">
-              <div className={`pb-5 border-b ${themeConfig.borderLight} flex flex-wrap items-start justify-between gap-4`}>
+            <div className="space-y-6">
+              <div className={`pb-4 border-b ${themeConfig.borderLight} flex flex-wrap items-start justify-between gap-3`}>
                 <div className="space-y-1">
-                  <div className="flex items-center gap-3 flex-wrap">
-                    <h3 className={`text-xl font-bold ${themeConfig.textPrimary}`}>
+                  <div className="flex items-center gap-2.5 flex-wrap">
+                    <h3 className={`text-lg font-bold ${themeConfig.textPrimary}`}>
                       {dictResult.query}
                     </h3>
                     {dictResult.phonetic && (
-                      <span className="text-sm font-mono text-indigo-400">
+                      <span className="text-xs font-mono text-indigo-400">
                         {dictResult.phonetic}
                       </span>
                     )}
                     <button
                       type="button"
                       onClick={() => handleListen(`dict-${dictResult.query}`, dictResult.query)}
-                      className={`p-1.5 rounded-md ${themeConfig.textSecondary} hover:${themeConfig.textPrimary} bg-slate-500/10 cursor-pointer`}
-                      title="Pronounce with Studio Neural TTS"
+                      className={`p-1 rounded ${themeConfig.textSecondary} hover:${themeConfig.textPrimary} bg-slate-500/10 cursor-pointer`}
+                      title="Listen to pronunciation"
                     >
-                      <Volume2 className="w-4 h-4" />
+                      <Volume2 className="w-3.5 h-3.5" />
                     </button>
                   </div>
                   {dictResult.wikidata && (
                     <div className={`text-xs ${themeConfig.textMuted} flex items-center gap-2 flex-wrap`}>
-                      <span className="text-emerald-400 font-mono font-semibold">
-                        Wikidata {dictResult.wikidata.id}
-                      </span>
-                      <span>·</span>
                       <span>{dictResult.wikidata.description}</span>
                       <a
                         href={dictResult.wikidata.url}
@@ -609,7 +605,7 @@ export const CrucialKnowledgePanel: React.FC<CrucialKnowledgePanelProps> = ({
                         rel="noreferrer"
                         className="text-indigo-400 hover:underline inline-flex items-center gap-1"
                       >
-                        <span>Entity Graph</span>
+                        <span>More details</span>
                         <ExternalLink className="w-3 h-3" />
                       </a>
                     </div>
@@ -619,28 +615,28 @@ export const CrucialKnowledgePanel: React.FC<CrucialKnowledgePanelProps> = ({
                 <button
                   type="button"
                   onClick={handleAppendDictResult}
-                  className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-md ${themeConfig.primaryButton} text-xs font-semibold cursor-pointer`}
+                  className={`inline-flex items-center gap-1 px-2.5 py-1 rounded ${themeConfig.primaryButton} text-[11px] font-semibold cursor-pointer`}
                 >
-                  {dictAppended ? <Check className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
-                  <span>{dictAppended ? 'Appended to Summary' : 'Append Entry to Summary'}</span>
+                  {dictAppended ? <Check className="w-3 h-3" /> : <Plus className="w-3 h-3" />}
+                  <span>{dictAppended ? 'Added to Summary' : '+ Add to Summary'}</span>
                 </button>
               </div>
 
               {/* Wikipedia REST Summary */}
               {dictResult.wikipedia && (
-                <div className="flex flex-col sm:flex-row items-start gap-5">
+                <div className="flex flex-col sm:flex-row items-start gap-4">
                   {dictResult.wikipedia.thumbnailUrl && (
                     <img
                       src={dictResult.wikipedia.thumbnailUrl}
                       alt={dictResult.wikipedia.title}
                       referrerPolicy="no-referrer"
-                      className="w-28 sm:w-36 rounded-lg object-cover shrink-0 bg-black/20"
+                      className="w-24 sm:w-32 rounded-lg object-cover shrink-0 bg-black/20"
                     />
                   )}
-                  <div className="space-y-2 max-w-3xl">
-                    <div className="flex items-center gap-2 text-xs text-indigo-400 font-semibold">
+                  <div className="space-y-1.5 max-w-3xl">
+                    <div className="flex items-center gap-1.5 text-xs text-indigo-400 font-semibold">
                       <BookOpen className="w-3.5 h-3.5" />
-                      <span>Wikipedia REST v1 Encyclopedia Extract</span>
+                      <span>Background Overview (Wikipedia)</span>
                     </div>
                     <p className={`text-sm leading-relaxed ${themeConfig.textSecondary}`}>
                       {dictResult.wikipedia.extract}
@@ -660,13 +656,13 @@ export const CrucialKnowledgePanel: React.FC<CrucialKnowledgePanelProps> = ({
 
               {/* Lexical Definitions */}
               {dictResult.definitions.length > 0 && (
-                <div className="space-y-3">
-                  <h4 className={`text-xs font-semibold uppercase tracking-wider ${themeConfig.textMuted}`}>
-                    Lexical Definitions (Free Dictionary API)
+                <div className="space-y-2.5">
+                  <h4 className={`text-[11px] font-semibold uppercase tracking-wider ${themeConfig.textMuted}`}>
+                    Dictionary Definitions
                   </h4>
                   <div className={`divide-y ${themeConfig.borderLight}`}>
                     {dictResult.definitions.map((d, i) => (
-                      <div key={i} className="py-3 first:pt-0 last:pb-0 space-y-1">
+                      <div key={i} className="py-2.5 first:pt-0 last:pb-0 space-y-1">
                         <div className="flex items-baseline gap-2">
                           <span className="text-xs font-mono font-semibold text-indigo-400">
                             {d.partOfSpeech}
@@ -674,7 +670,7 @@ export const CrucialKnowledgePanel: React.FC<CrucialKnowledgePanelProps> = ({
                           <p className={`text-sm ${themeConfig.textPrimary}`}>{d.definition}</p>
                         </div>
                         {d.example && (
-                          <p className={`text-xs italic ${themeConfig.textMuted} pl-12`}>
+                          <p className={`text-xs italic ${themeConfig.textMuted} pl-10`}>
                             &ldquo;{d.example}&rdquo;
                           </p>
                         )}
@@ -686,16 +682,16 @@ export const CrucialKnowledgePanel: React.FC<CrucialKnowledgePanelProps> = ({
 
               {/* Datamuse Semantic Concept Neighbors */}
               {dictResult.relatedTerms.length > 0 && (
-                <div className="space-y-3">
-                  <h4 className={`text-xs font-semibold uppercase tracking-wider ${themeConfig.textMuted}`}>
-                    Semantically Related Concepts (Datamuse Lexical Graph API)
+                <div className="space-y-2.5">
+                  <h4 className={`text-[11px] font-semibold uppercase tracking-wider ${themeConfig.textMuted}`}>
+                    Related Words &amp; Ideas
                   </h4>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                     {dictResult.relatedTerms.map((rt, i) => (
                       <div
                         key={i}
                         onClick={() => performDictionaryLookup(rt.word)}
-                        className="p-3 rounded-lg bg-slate-500/5 hover:bg-slate-500/10 cursor-pointer transition-colors space-y-1"
+                        className="p-2.5 rounded-lg bg-slate-500/5 hover:bg-slate-500/10 cursor-pointer transition-colors space-y-1"
                       >
                         <div className="flex items-center justify-between">
                           <span className={`text-xs font-bold ${themeConfig.textPrimary}`}>
@@ -723,8 +719,8 @@ export const CrucialKnowledgePanel: React.FC<CrucialKnowledgePanelProps> = ({
         <>
           {/* 1. Core Principles & Mental Models */}
           {filteredTakeaways.length > 0 && (
-            <section className="space-y-6">
-              <h3 className={`text-sm font-semibold ${themeConfig.textPrimary}`}>
+            <section className="space-y-4">
+              <h3 className={`text-xs font-semibold uppercase tracking-wider ${themeConfig.textMuted}`}>
                 Big Lessons &amp; Ideas Worth Remembering
               </h3>
 
@@ -741,29 +737,29 @@ export const CrucialKnowledgePanel: React.FC<CrucialKnowledgePanelProps> = ({
                   return (
                     <div
                       key={item.id}
-                      className="py-5 first:pt-0 last:pb-0 flex flex-col lg:flex-row lg:items-start justify-between gap-4"
+                      className="py-4 first:pt-0 last:pb-0 flex flex-col lg:flex-row lg:items-start justify-between gap-3"
                     >
-                      <div className="space-y-2 max-w-4xl">
-                        <div className="flex items-center gap-2.5 flex-wrap">
-                          <h4 className={`text-base font-bold ${themeConfig.textPrimary}`}>
+                      <div className="space-y-1.5 max-w-4xl">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h4 className={`text-sm sm:text-base font-bold ${themeConfig.textPrimary}`}>
                             {item.principle}
                           </h4>
                           {tsMatch && onSeekToTimestamp && (
                             <button
                               type="button"
                               onClick={() => onSeekToTimestamp(tsMatch.seconds)}
-                              className={`inline-flex items-center gap-1 font-mono text-xs font-semibold px-2 py-0.5 rounded cursor-pointer tabular-nums transition-colors ${
+                              className={`inline-flex items-center gap-1 font-mono text-[11px] font-semibold px-1.5 py-0.5 rounded cursor-pointer tabular-nums transition-colors ${
                                 isSyncedTime
                                   ? 'bg-indigo-600 text-white shadow-sm'
                                   : 'bg-indigo-500/10 text-indigo-400 hover:bg-indigo-500/20'
                               }`}
                               title={`Jump video to [${tsMatch.label}]`}
                             >
-                              <Clock className="w-3 h-3" />
+                              <Clock className="w-2.5 h-2.5" />
                               <span>[{tsMatch.label}]</span>
                             </button>
                           )}
-                          <span className={`text-xs ${themeConfig.textMuted}`}>
+                          <span className={`text-[11px] ${themeConfig.textMuted}`}>
                             · {item.category.replace('_', ' ')}
                           </span>
                         </div>
@@ -773,40 +769,40 @@ export const CrucialKnowledgePanel: React.FC<CrucialKnowledgePanelProps> = ({
                         </p>
 
                         {item.quote && (
-                          <blockquote className={`pl-4 border-l-2 border-amber-500/60 text-xs italic ${themeConfig.textMuted}`}>
+                          <blockquote className={`pl-3 border-l-2 border-amber-500/60 text-xs italic ${themeConfig.textMuted}`}>
                             &ldquo;{item.quote}&rdquo;
                           </blockquote>
                         )}
 
-                        <div className="text-xs pt-1">
-                          <span className="font-semibold text-amber-400">Actionable Takeaway: </span>
+                        <div className="text-xs pt-0.5">
+                          <span className="font-semibold text-amber-400">How to use this: </span>
                           <span className={themeConfig.textSecondary}>{item.actionableLesson}</span>
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-2 shrink-0">
+                      <div className="flex items-center gap-1 shrink-0">
                         <button
                           type="button"
                           onClick={() =>
                             handleListen(item.id, `${item.principle}. ${item.description}. ${item.actionableLesson}`)
                           }
-                          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium cursor-pointer transition-colors whitespace-nowrap ${
+                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium cursor-pointer transition-colors whitespace-nowrap ${
                             isSpeaking
                               ? 'bg-amber-500 text-slate-950 font-semibold'
-                              : `${themeConfig.textMuted} hover:${themeConfig.textPrimary} hover:bg-slate-500/10`
+                              : `${themeConfig.textMuted} hover:${themeConfig.textPrimary} bg-slate-500/10 hover:bg-slate-500/15`
                           }`}
                         >
-                          <Volume2 className="w-3.5 h-3.5" />
-                          <span>{isSpeaking ? 'Listening...' : 'Listen'}</span>
+                          <Volume2 className="w-3 h-3" />
+                          <span>{isSpeaking ? 'Stop' : 'Listen'}</span>
                         </button>
 
                         <button
                           type="button"
                           onClick={() => handleAppendSingleTakeaway(item)}
-                          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium ${themeConfig.textSecondary} hover:${themeConfig.textPrimary} hover:bg-slate-500/10 cursor-pointer transition-colors whitespace-nowrap`}
+                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium ${themeConfig.textSecondary} hover:${themeConfig.textPrimary} bg-slate-500/10 hover:bg-slate-500/15 cursor-pointer transition-colors whitespace-nowrap`}
                         >
-                          <Plus className="w-3.5 h-3.5 text-amber-400" />
-                          <span>Add to Summary</span>
+                          <Plus className="w-3 h-3 text-amber-400" />
+                          <span>+ Summary</span>
                         </button>
 
                         {onSaveToList && (
@@ -821,10 +817,10 @@ export const CrucialKnowledgePanel: React.FC<CrucialKnowledgePanelProps> = ({
                                 notes: item.quote ? `Quote: "${item.quote}"` : '',
                               })
                             }
-                            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium ${themeConfig.textSecondary} hover:${themeConfig.textPrimary} hover:bg-slate-500/10 cursor-pointer transition-colors whitespace-nowrap`}
+                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium ${themeConfig.textSecondary} hover:${themeConfig.textPrimary} bg-slate-500/10 hover:bg-slate-500/15 cursor-pointer transition-colors whitespace-nowrap`}
                           >
-                            <Bookmark className="w-3.5 h-3.5 text-indigo-400" />
-                            <span>Save to List</span>
+                            <Bookmark className="w-3 h-3 text-indigo-400" />
+                            <span>Save</span>
                           </button>
                         )}
                       </div>
@@ -837,8 +833,8 @@ export const CrucialKnowledgePanel: React.FC<CrucialKnowledgePanelProps> = ({
 
           {/* 2. Full Forms & Crucial Terminology Glossary */}
           {filteredTerms.length > 0 && (
-            <section className="space-y-6">
-              <h3 className={`text-sm font-semibold ${themeConfig.textPrimary}`}>
+            <section className="space-y-4">
+              <h3 className={`text-xs font-semibold uppercase tracking-wider ${themeConfig.textMuted}`}>
                 Helpful Words, Terms &amp; Abbreviations Explained
               </h3>
 
@@ -855,10 +851,10 @@ export const CrucialKnowledgePanel: React.FC<CrucialKnowledgePanelProps> = ({
                   return (
                     <div
                       key={idx}
-                      className="py-4 first:pt-0 last:pb-0 flex flex-col lg:flex-row lg:items-start justify-between gap-4"
+                      className="py-3.5 first:pt-0 last:pb-0 flex flex-col lg:flex-row lg:items-start justify-between gap-3"
                     >
-                      <div className="space-y-1.5 max-w-4xl">
-                        <div className="flex items-baseline gap-2.5 flex-wrap">
+                      <div className="space-y-1 max-w-4xl">
+                        <div className="flex items-baseline gap-2 flex-wrap">
                           <span className="text-sm font-mono font-bold text-indigo-400">
                             {termItem.term}
                           </span>
@@ -871,18 +867,18 @@ export const CrucialKnowledgePanel: React.FC<CrucialKnowledgePanelProps> = ({
                             <button
                               type="button"
                               onClick={() => onSeekToTimestamp(tsMatch.seconds)}
-                              className={`inline-flex items-center gap-1 font-mono text-xs font-semibold px-2 py-0.5 rounded cursor-pointer tabular-nums transition-colors ${
+                              className={`inline-flex items-center gap-1 font-mono text-[11px] font-semibold px-1.5 py-0.5 rounded cursor-pointer tabular-nums transition-colors ${
                                 isSyncedTime
                                   ? 'bg-indigo-600 text-white shadow-sm'
                                   : 'bg-indigo-500/10 text-indigo-400 hover:bg-indigo-500/20'
                               }`}
                               title={`Jump video to [${tsMatch.label}]`}
                             >
-                              <Clock className="w-3 h-3" />
+                              <Clock className="w-2.5 h-2.5" />
                               <span>[{tsMatch.label}]</span>
                             </button>
                           )}
-                          <span className={`text-xs ${themeConfig.textMuted}`}>
+                          <span className={`text-[11px] ${themeConfig.textMuted}`}>
                             · {termItem.tag || termItem.category}
                           </span>
                         </div>
@@ -893,12 +889,12 @@ export const CrucialKnowledgePanel: React.FC<CrucialKnowledgePanelProps> = ({
 
                         {termItem.contextInVideo && (
                           <p className={`text-xs italic ${themeConfig.textMuted}`}>
-                            Context: &ldquo;{termItem.contextInVideo}&rdquo;
+                            In video: &ldquo;{termItem.contextInVideo}&rdquo;
                           </p>
                         )}
                       </div>
 
-                      <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                      <div className="flex items-center gap-1 shrink-0 flex-wrap">
                         <button
                           type="button"
                           onClick={() =>
@@ -907,42 +903,42 @@ export const CrucialKnowledgePanel: React.FC<CrucialKnowledgePanelProps> = ({
                               `${termItem.term}. ${termItem.fullForm || ''}. ${termItem.definition}`
                             )
                           }
-                          className={`p-1.5 rounded-lg cursor-pointer transition-colors ${
+                          className={`p-1 rounded cursor-pointer transition-colors ${
                             isSpeaking
                               ? 'text-amber-400 bg-amber-500/10'
-                              : `${themeConfig.textMuted} hover:${themeConfig.textPrimary} hover:bg-slate-500/10`
+                              : `${themeConfig.textMuted} hover:${themeConfig.textPrimary} bg-slate-500/10 hover:bg-slate-500/15`
                           }`}
                           title="Listen"
                         >
-                          <Volume2 className="w-3.5 h-3.5" />
+                          <Volume2 className="w-3 h-3" />
                         </button>
 
                         <button
                           type="button"
                           onClick={() => performDictionaryLookup(termItem.fullForm || termItem.term)}
-                          className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 cursor-pointer transition-colors whitespace-nowrap"
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] text-emerald-400 hover:text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/15 cursor-pointer transition-colors whitespace-nowrap"
                           title="Look up plain-English meaning and Wikipedia background"
                         >
-                          <Globe className="w-3 h-3" />
-                          <span>Look Up Meaning</span>
+                          <Globe className="w-2.5 h-2.5" />
+                          <span>Meaning</span>
                         </button>
 
                         <button
                           type="button"
                           onClick={() => onExploreTerm(termItem.fullForm || termItem.term)}
-                          className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs text-indigo-400 hover:text-indigo-300 hover:bg-indigo-500/10 cursor-pointer transition-colors whitespace-nowrap"
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] text-indigo-400 hover:text-indigo-300 bg-indigo-500/10 hover:bg-indigo-500/15 cursor-pointer transition-colors whitespace-nowrap"
                         >
-                          <span>Find Videos &amp; Books</span>
-                          <ArrowRight className="w-3 h-3" />
+                          <span>Explore</span>
+                          <ArrowRight className="w-2.5 h-2.5" />
                         </button>
 
                         <button
                           type="button"
                           onClick={() => handleAppendSingleTerm(termItem)}
-                          className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium ${themeConfig.textSecondary} hover:${themeConfig.textPrimary} hover:bg-slate-500/10 cursor-pointer transition-colors whitespace-nowrap`}
+                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium ${themeConfig.textSecondary} hover:${themeConfig.textPrimary} bg-slate-500/10 hover:bg-slate-500/15 cursor-pointer transition-colors whitespace-nowrap`}
                         >
-                          <Plus className="w-3 h-3" />
-                          <span>Add to Summary</span>
+                          <Plus className="w-2.5 h-2.5" />
+                          <span>+ Summary</span>
                         </button>
 
                         {onSaveToList && (
@@ -957,10 +953,10 @@ export const CrucialKnowledgePanel: React.FC<CrucialKnowledgePanelProps> = ({
                                 notes: termItem.contextInVideo ? `In video: "${termItem.contextInVideo}"` : '',
                               })
                             }
-                            className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium ${themeConfig.textSecondary} hover:${themeConfig.textPrimary} hover:bg-slate-500/10 cursor-pointer transition-colors whitespace-nowrap`}
+                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium ${themeConfig.textSecondary} hover:${themeConfig.textPrimary} bg-slate-500/10 hover:bg-slate-500/15 cursor-pointer transition-colors whitespace-nowrap`}
                           >
-                            <Bookmark className="w-3 h-3 text-indigo-400" />
-                            <span>Save to List</span>
+                            <Bookmark className="w-2.5 h-2.5 text-indigo-400" />
+                            <span>Save</span>
                           </button>
                         )}
                       </div>

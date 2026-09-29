@@ -151,15 +151,15 @@ export const ScrapedDataViewer: React.FC<ScrapedDataViewerProps> = ({
   const durationLabel = segments.length > 0 ? segments[segments.length - 1].formattedTime : '00:00';
 
   return (
-    <div className="w-full space-y-8">
+    <div className="w-full space-y-6">
       {/* Unboxed Header & Export Bar */}
-      <div className={`pb-5 border-b ${themeConfig.borderLight} space-y-5`}>
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div className="space-y-1">
-            <h2 className={`text-lg sm:text-xl font-bold tracking-tight ${themeConfig.textPrimary}`}>
-              Downloads, Subtitles &amp; Video Info
+      <div className={`pb-3 border-b ${themeConfig.borderLight} space-y-3`}>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="space-y-0.5">
+            <h2 className={`text-sm sm:text-base font-bold tracking-tight ${themeConfig.textPrimary}`}>
+              Downloads, Subtitles &amp; Video Details
             </h2>
-            <div className={`flex items-center gap-2 text-xs ${themeConfig.textMuted} tabular-nums flex-wrap`}>
+            <div className={`flex items-center gap-2 text-[11px] ${themeConfig.textMuted} tabular-nums flex-wrap`}>
               <span>{segments.length.toLocaleString()} caption lines</span>
               <span aria-hidden="true">·</span>
               <span>{wordCount.toLocaleString()} words</span>
@@ -170,42 +170,42 @@ export const ScrapedDataViewer: React.FC<ScrapedDataViewerProps> = ({
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-1.5">
             <button
               type="button"
               onClick={() => handleCopy('master-json', jsonString)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg ${themeConfig.textSecondary} hover:${themeConfig.textPrimary} hover:bg-slate-500/10 text-xs font-medium cursor-pointer transition-colors whitespace-nowrap`}
+              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded ${themeConfig.textSecondary} hover:${themeConfig.textPrimary} bg-slate-500/10 hover:bg-slate-500/15 text-[11px] font-medium cursor-pointer transition-colors whitespace-nowrap`}
             >
-              {copiedKey === 'master-json' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-              <span>{copiedKey === 'master-json' ? 'Copied JSON' : 'Copy JSON'}</span>
+              {copiedKey === 'master-json' ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+              <span>{copiedKey === 'master-json' ? 'Copied' : 'Copy Data'}</span>
             </button>
 
             <button
               type="button"
-              onClick={() => handleDownload(`scrape-${videoId}.json`, jsonString, 'application/json')}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-teal-600 hover:bg-teal-500 text-white text-xs font-semibold cursor-pointer transition-colors whitespace-nowrap"
+              onClick={() => handleDownload(`video-data-${videoId}.json`, jsonString, 'application/json')}
+              className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded bg-teal-600 hover:bg-teal-500 text-white text-[11px] font-semibold cursor-pointer transition-colors whitespace-nowrap"
             >
-              <Download className="w-3.5 h-3.5" />
-              <span>Download Full Scrape (.json)</span>
+              <Download className="w-3 h-3" />
+              <span>Save .json</span>
             </button>
           </div>
         </div>
 
         {/* Format Selector Tabs */}
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-1.5 flex-wrap">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-1 flex-wrap">
             {[
-              { id: 'overview', label: 'Structured Overview' },
-              { id: 'json', label: 'Raw JSON' },
+              { id: 'overview', label: 'Video Overview' },
+              { id: 'json', label: 'JSON Data' },
               { id: 'vtt', label: 'WebVTT (.vtt)' },
-              { id: 'srt', label: 'SubRip (.srt)' },
-              { id: 'text', label: 'Clean Text (.txt)' },
+              { id: 'srt', label: 'Subtitles (.srt)' },
+              { id: 'text', label: 'Plain Text (.txt)' },
             ].map((tab) => (
               <button
                 key={tab.id}
                 type="button"
                 onClick={() => setActiveFormat(tab.id as any)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium cursor-pointer transition-colors whitespace-nowrap ${
+                className={`px-2 py-0.5 rounded text-[11px] font-medium cursor-pointer transition-colors whitespace-nowrap ${
                   activeFormat === tab.id
                     ? `${themeConfig.accentBg} ${themeConfig.accent} font-semibold`
                     : `${themeConfig.textMuted} hover:${themeConfig.textPrimary} hover:bg-slate-500/10`
@@ -216,14 +216,14 @@ export const ScrapedDataViewer: React.FC<ScrapedDataViewerProps> = ({
             ))}
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
             {activeFormat === 'vtt' && (
               <button
                 type="button"
                 onClick={() => handleDownload(`subtitles-${videoId}.vtt`, vttText, 'text/vtt')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium ${themeConfig.textSecondary} hover:${themeConfig.textPrimary} hover:bg-slate-500/10 cursor-pointer transition-colors flex items-center gap-1.5`}
+                className={`px-2 py-0.5 rounded text-[11px] font-medium ${themeConfig.textSecondary} hover:${themeConfig.textPrimary} bg-slate-500/10 hover:bg-slate-500/15 cursor-pointer transition-colors inline-flex items-center gap-1`}
               >
-                <Download className="w-3.5 h-3.5" />
+                <Download className="w-3 h-3" />
                 <span>Save .vtt</span>
               </button>
             )}
@@ -231,9 +231,9 @@ export const ScrapedDataViewer: React.FC<ScrapedDataViewerProps> = ({
               <button
                 type="button"
                 onClick={() => handleDownload(`subtitles-${videoId}.srt`, srtText, 'application/x-subrip')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium ${themeConfig.textSecondary} hover:${themeConfig.textPrimary} hover:bg-slate-500/10 cursor-pointer transition-colors flex items-center gap-1.5`}
+                className={`px-2 py-0.5 rounded text-[11px] font-medium ${themeConfig.textSecondary} hover:${themeConfig.textPrimary} bg-slate-500/10 hover:bg-slate-500/15 cursor-pointer transition-colors inline-flex items-center gap-1`}
               >
-                <Download className="w-3.5 h-3.5" />
+                <Download className="w-3 h-3" />
                 <span>Save .srt</span>
               </button>
             )}
@@ -241,9 +241,9 @@ export const ScrapedDataViewer: React.FC<ScrapedDataViewerProps> = ({
               <button
                 type="button"
                 onClick={() => handleDownload(`transcript-${videoId}.txt`, plainText, 'text/plain')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium ${themeConfig.textSecondary} hover:${themeConfig.textPrimary} hover:bg-slate-500/10 cursor-pointer transition-colors flex items-center gap-1.5`}
+                className={`px-2 py-0.5 rounded text-[11px] font-medium ${themeConfig.textSecondary} hover:${themeConfig.textPrimary} bg-slate-500/10 hover:bg-slate-500/15 cursor-pointer transition-colors inline-flex items-center gap-1`}
               >
-                <Download className="w-3.5 h-3.5" />
+                <Download className="w-3 h-3" />
                 <span>Save .txt</span>
               </button>
             )}
@@ -253,19 +253,19 @@ export const ScrapedDataViewer: React.FC<ScrapedDataViewerProps> = ({
 
       {/* 1. Format: STRUCTURED OVERVIEW (Unboxed) */}
       {activeFormat === 'overview' && (
-        <div className="space-y-10">
-          <section className="space-y-4">
-            <h3 className={`text-sm font-semibold ${themeConfig.textPrimary}`}>
-              01. Video Target Metadata
+        <div className="space-y-8">
+          <section className="space-y-3">
+            <h3 className={`text-xs font-semibold uppercase tracking-wider ${themeConfig.textMuted}`}>
+              Video Details
             </h3>
-            <div className={`grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 py-4 border-y ${themeConfig.borderLight} text-xs`}>
-              <div className="space-y-1">
+            <div className={`grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 py-3 border-y ${themeConfig.borderLight} text-xs`}>
+              <div className="space-y-0.5">
                 <span className={themeConfig.textMuted}>Video Title</span>
                 <p className={`font-semibold ${themeConfig.textPrimary}`}>{metadata?.title || 'Unknown Video'}</p>
               </div>
 
-              <div className="space-y-1">
-                <span className={themeConfig.textMuted}>Channel / Author</span>
+              <div className="space-y-0.5">
+                <span className={themeConfig.textMuted}>Channel</span>
                 <p className={`font-semibold ${themeConfig.textPrimary}`}>
                   {metadata?.authorName ? (
                     <a
@@ -283,13 +283,13 @@ export const ScrapedDataViewer: React.FC<ScrapedDataViewerProps> = ({
                 </p>
               </div>
 
-              <div className="space-y-1">
+              <div className="space-y-0.5">
                 <span className={themeConfig.textMuted}>Video ID</span>
                 <p className="font-mono tabular-nums text-slate-300">{videoId}</p>
               </div>
 
-              <div className="space-y-1">
-                <span className={themeConfig.textMuted}>Target URL</span>
+              <div className="space-y-0.5">
+                <span className={themeConfig.textMuted}>YouTube Link</span>
                 <p className="font-mono truncate">
                   <a href={videoUrl} target="_blank" rel="noopener noreferrer" className="hover:underline text-indigo-400">
                     {videoUrl}
@@ -299,20 +299,20 @@ export const ScrapedDataViewer: React.FC<ScrapedDataViewerProps> = ({
 
               {ytStats && (
                 <>
-                  <div className="space-y-1">
-                    <span className={themeConfig.textMuted}>Total Views (YouTube API)</span>
+                  <div className="space-y-0.5">
+                    <span className={themeConfig.textMuted}>Views</span>
                     <p className={`font-semibold tabular-nums ${themeConfig.textPrimary}`}>
                       {Number(ytStats.viewCount || 0).toLocaleString()}
                     </p>
                   </div>
-                  <div className="space-y-1">
-                    <span className={themeConfig.textMuted}>Likes (YouTube API)</span>
+                  <div className="space-y-0.5">
+                    <span className={themeConfig.textMuted}>Likes</span>
                     <p className={`font-semibold tabular-nums ${themeConfig.textPrimary}`}>
                       {Number(ytStats.likeCount || 0).toLocaleString()}
                     </p>
                   </div>
-                  <div className="space-y-1">
-                    <span className={themeConfig.textMuted}>Comments Count</span>
+                  <div className="space-y-0.5">
+                    <span className={themeConfig.textMuted}>Comments</span>
                     <p className={`font-semibold tabular-nums ${themeConfig.textPrimary}`}>
                       {Number(ytStats.commentCount || 0).toLocaleString()}
                     </p>
@@ -323,15 +323,15 @@ export const ScrapedDataViewer: React.FC<ScrapedDataViewerProps> = ({
           </section>
 
           {ytComments.length > 0 && (
-            <section className="space-y-4">
+            <section className="space-y-3">
               <div className="flex items-center justify-between">
-                <h3 className={`text-sm font-semibold ${themeConfig.textPrimary}`}>
-                  02. Top Audience Discussions (YouTube CommentThreads API — {ytComments.length} loaded)
+                <h3 className={`text-xs font-semibold uppercase tracking-wider ${themeConfig.textMuted}`}>
+                  Viewer Comments ({ytComments.length})
                 </h3>
               </div>
               <div className={`divide-y ${themeConfig.borderLight}`}>
                 {ytComments.slice(0, 10).map((c) => (
-                  <div key={c.id} className="py-3 space-y-1 text-xs">
+                  <div key={c.id} className="py-2.5 space-y-1 text-xs">
                     <div className="flex items-center gap-2">
                       <span className="font-semibold text-indigo-400">{c.author}</span>
                       <span aria-hidden="true" className={themeConfig.textMuted}>·</span>
@@ -344,17 +344,17 @@ export const ScrapedDataViewer: React.FC<ScrapedDataViewerProps> = ({
             </section>
           )}
 
-          <section className="space-y-4">
+          <section className="space-y-3">
             <div className="flex items-center justify-between">
-              <h3 className={`text-sm font-semibold ${themeConfig.textPrimary}`}>
-                02. Extracted Transcript Stream Sample (First 15 of {segments.length})
+              <h3 className={`text-xs font-semibold uppercase tracking-wider ${themeConfig.textMuted}`}>
+                Caption Preview (First 15 of {segments.length} lines)
               </h3>
               <button
                 type="button"
                 onClick={() => setActiveFormat('json')}
-                className="text-xs text-indigo-400 hover:underline cursor-pointer"
+                className="text-[11px] text-indigo-400 hover:underline cursor-pointer"
               >
-                View complete JSON →
+                View full JSON →
               </button>
             </div>
 
