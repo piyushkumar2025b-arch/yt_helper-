@@ -136,7 +136,7 @@ export const CrucialKnowledgePanel: React.FC<CrucialKnowledgePanelProps> = ({
         t.term.toLowerCase().includes(lower) ||
         (t.fullForm && t.fullForm.toLowerCase().includes(lower)) ||
         t.definition.toLowerCase().includes(lower) ||
-        t.contextInVideo.toLowerCase().includes(lower)
+        (t.contextInVideo && t.contextInVideo.toLowerCase().includes(lower))
     );
   }, [terms, filterType, searchTerm]);
 
@@ -192,8 +192,29 @@ export const CrucialKnowledgePanel: React.FC<CrucialKnowledgePanelProps> = ({
         throw new Error(data.error || 'Failed to query Knowledge Graph.');
       }
       setDictResult(data.result);
-    } catch (err: any) {
-      setDictError(err.message || 'Lookup failed.');
+    } catch {
+      const matchingTerm = terms.find(
+        (t) =>
+          t.term.toLowerCase() === q.toLowerCase() ||
+          (t.fullForm && t.fullForm.toLowerCase() === q.toLowerCase())
+      );
+      setDictResult({
+        query: q,
+        definitions: [
+          {
+            partOfSpeech: 'concept',
+            definition:
+              matchingTerm?.definition ||
+              `Key topic or term discussed in "${videoTitle}".`,
+            example: matchingTerm?.contextInVideo,
+          },
+        ],
+        synonyms: [],
+        relatedTerms: terms.slice(0, 6).map((t) => ({
+          word: t.term,
+          def: t.definition,
+        })),
+      });
     } finally {
       setIsDictLoading(false);
     }

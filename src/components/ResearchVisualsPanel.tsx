@@ -142,46 +142,44 @@ export const ResearchVisualsPanel: React.FC<ResearchVisualsPanelProps> = ({
     setHasMore(true);
 
     try {
+      const safeFetchJson = async (url: string) => {
+        try {
+          const r = await fetch(url);
+          if (!r.ok) return { ok: false, data: {} };
+          const d = await r.json().catch(() => ({}));
+          return { ok: true, data: d };
+        } catch {
+          return { ok: false, data: {} };
+        }
+      };
+
       const [acadRes, codeRes, commRes, podRes, webRes, imgRes, newsRes, booksRes, ytRes] =
         await Promise.all([
-          fetch(`/api/academic-search?q=${encodeURIComponent(q)}&page=0`),
-          fetch(`/api/github-search?q=${encodeURIComponent(q)}&page=0`),
-          fetch(`/api/community-search?q=${encodeURIComponent(q)}&page=0`),
-          fetch(`/api/podcasts-datasets?q=${encodeURIComponent(q)}&page=0`),
-          fetch(`/api/web-search?q=${encodeURIComponent(q)}&page=0`),
-          fetch(`/api/image-search?q=${encodeURIComponent(q)}&page=0`),
-          fetch(`/api/news-search?q=${encodeURIComponent(q)}&page=0`),
-          fetch(`/api/books-search?q=${encodeURIComponent(q)}&page=0`),
-          fetch(`/api/youtube-search?q=${encodeURIComponent(q)}&page=0`),
+          safeFetchJson(`/api/academic-search?q=${encodeURIComponent(q)}&page=0`),
+          safeFetchJson(`/api/github-search?q=${encodeURIComponent(q)}&page=0`),
+          safeFetchJson(`/api/community-search?q=${encodeURIComponent(q)}&page=0`),
+          safeFetchJson(`/api/podcasts-datasets?q=${encodeURIComponent(q)}&page=0`),
+          safeFetchJson(`/api/web-search?q=${encodeURIComponent(q)}&page=0`),
+          safeFetchJson(`/api/image-search?q=${encodeURIComponent(q)}&page=0`),
+          safeFetchJson(`/api/news-search?q=${encodeURIComponent(q)}&page=0`),
+          safeFetchJson(`/api/books-search?q=${encodeURIComponent(q)}&page=0`),
+          safeFetchJson(`/api/youtube-search?q=${encodeURIComponent(q)}&page=0`),
         ]);
 
-      const [acadData, codeData, commData, podData, webData, imgData, newsData, booksData, ytData] =
-        await Promise.all([
-          acadRes.json().catch(() => ({})),
-          codeRes.json().catch(() => ({})),
-          commRes.json().catch(() => ({})),
-          podRes.json().catch(() => ({})),
-          webRes.json().catch(() => ({})),
-          imgRes.json().catch(() => ({})),
-          newsRes.json().catch(() => ({})),
-          booksRes.json().catch(() => ({})),
-          ytRes.json().catch(() => ({})),
-        ]);
-
-      setAcademicResults(acadRes.ok && Array.isArray(acadData.papers) ? acadData.papers : []);
-      setCodeResults(codeRes.ok && Array.isArray(codeData.repos) ? codeData.repos : []);
+      setAcademicResults(acadRes.ok && Array.isArray(acadRes.data.papers) ? acadRes.data.papers : []);
+      setCodeResults(codeRes.ok && Array.isArray(codeRes.data.repos) ? codeRes.data.repos : []);
       setDiscussionResults(
-        commRes.ok && Array.isArray(commData.discussions) ? commData.discussions : []
+        commRes.ok && Array.isArray(commRes.data.discussions) ? commRes.data.discussions : []
       );
-      setPodcastResults(podRes.ok && Array.isArray(podData.items) ? podData.items : []);
-      setWebResults(webRes.ok && Array.isArray(webData.results) ? webData.results : []);
-      setImageResults(imgRes.ok && Array.isArray(imgData.images) ? imgData.images : []);
-      setNewsResults(newsRes.ok && Array.isArray(newsData.news) ? newsData.news : []);
-      setBookResults(booksRes.ok && Array.isArray(booksData.books) ? booksData.books : []);
-      setYtResults(ytRes.ok && Array.isArray(ytData.videos) ? ytData.videos : []);
-      setYtNextPageToken(ytData.nextPageToken || null);
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Failed to search sources.');
+      setPodcastResults(podRes.ok && Array.isArray(podRes.data.items) ? podRes.data.items : []);
+      setWebResults(webRes.ok && Array.isArray(webRes.data.results) ? webRes.data.results : []);
+      setImageResults(imgRes.ok && Array.isArray(imgRes.data.images) ? imgRes.data.images : []);
+      setNewsResults(newsRes.ok && Array.isArray(newsRes.data.news) ? newsRes.data.news : []);
+      setBookResults(booksRes.ok && Array.isArray(booksRes.data.books) ? booksRes.data.books : []);
+      setYtResults(ytRes.ok && Array.isArray(ytRes.data.videos) ? ytRes.data.videos : []);
+      setYtNextPageToken(ytRes.data.nextPageToken || null);
+    } catch {
+      // handled per-request
     } finally {
       setIsLoading(false);
       isFetchingRef.current = false;

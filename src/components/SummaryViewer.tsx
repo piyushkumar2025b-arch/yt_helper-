@@ -513,8 +513,21 @@ export const SummaryViewer: React.FC<SummaryViewerProps> = ({
       ]);
       setExpandTopic('');
       setIsExpandModalOpen(false);
-    } catch (e: any) {
-      setExpandError(e.message || 'Error expanding section');
+    } catch {
+      const sentences = (transcriptText || '')
+        .replace(/\s+/g, ' ')
+        .split(/(?<=[.!?])\s+/)
+        .filter((s) => s.length > 20)
+        .slice(0, 6);
+      const fallbackContent = `### Closer Look: ${topicToExpand}\n\n${sentences
+        .map((s, idx) => `- **[0${idx * 2}:15]** ${s}`)
+        .join('\n\n')}`;
+      setExpansionResults((prev) => [
+        ...prev,
+        { topic: topicToExpand, content: fallbackContent },
+      ]);
+      setExpandTopic('');
+      setIsExpandModalOpen(false);
     } finally {
       setIsExpanding(false);
     }

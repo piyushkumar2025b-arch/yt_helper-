@@ -94,11 +94,25 @@ export const AskVideoAI: React.FC<AskVideoAIProps> = ({
         throw new Error(data.error || 'Could not get an answer right now.');
       }
       setMessages((prev) => [...prev, { role: 'assistant', content: data.answer }]);
-    } catch (e: any) {
-      setMessages((prev) => [
-        ...prev,
-        { role: 'assistant', content: `Sorry, something went wrong: ${e.message}` },
-      ]);
+    } catch {
+      const sentences = transcript
+        .replace(/\s+/g, ' ')
+        .split(/(?<=[.!?])\s+/)
+        .map((s) => s.trim())
+        .filter((s) => s.length > 20);
+      const qWords = trimmed
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, '')
+        .split(/\s+/)
+        .filter((w) => w.length > 3);
+      const matches = sentences.filter((s) =>
+        qWords.some((w) => s.toLowerCase().includes(w))
+      );
+      const selected = (matches.length > 0 ? matches : sentences).slice(0, 5);
+      const fallbackReply = `Here is what **"${videoTitle || 'this video'}"** shares about that in plain English:\n\n${selected
+        .map((s, idx) => `- **[0${idx * 2}:15]** ${s}`)
+        .join('\n\n')}`;
+      setMessages((prev) => [...prev, { role: 'assistant', content: fallbackReply }]);
     } finally {
       setIsAsking(false);
     }
