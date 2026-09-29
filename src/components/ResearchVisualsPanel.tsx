@@ -26,6 +26,7 @@ import {
   Sparkles,
   Link2,
   Trash2,
+  FolderOpen,
 } from 'lucide-react';
 import {
   WebSearchResult,
@@ -1047,9 +1048,32 @@ export const ResearchVisualsPanel: React.FC<ResearchVisualsPanelProps> = ({
                     Verified Exact Links
                   </span>
                 </div>
-                <span className={`text-xs ${themeConfig.textMuted} tabular-nums`}>
-                  {exactResources.length} exact resources
-                </span>
+                <div className="flex items-center gap-2">
+                  {onSaveToList && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        exactResources.forEach((r) => {
+                          onSaveToList({
+                            itemType: r.type === 'Book / Publication' ? 'book' : 'article',
+                            title: r.title,
+                            url: r.primaryUrl,
+                            subtitle: `${r.type}${r.authorOrCreator ? ` · ${r.authorOrCreator}` : ''}`,
+                            content: r.description,
+                            notes: r.exactQuote,
+                          });
+                        });
+                      }}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold bg-amber-500/15 text-amber-400 hover:bg-amber-500/25 cursor-pointer transition-colors"
+                    >
+                      <FolderOpen className="w-3 h-3" />
+                      <span>+ Save All to Artifacts ({exactResources.length})</span>
+                    </button>
+                  )}
+                  <span className={`text-xs ${themeConfig.textMuted} tabular-nums`}>
+                    {exactResources.length} exact resources
+                  </span>
+                </div>
               </div>
 
               <div className={`divide-y ${themeConfig.borderLight}`}>
@@ -1149,10 +1173,10 @@ export const ResearchVisualsPanel: React.FC<ResearchVisualsPanelProps> = ({
                                   notes: res.exactQuote,
                                 })
                               }
-                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-slate-500/10 ${themeConfig.textSecondary} hover:${themeConfig.textPrimary} cursor-pointer`}
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 cursor-pointer"
                             >
-                              <Bookmark className="w-2.5 h-2.5" />
-                              <span>Save</span>
+                              <FolderOpen className="w-2.5 h-2.5" />
+                              <span>+ Save to Artifacts</span>
                             </button>
                           )}
 

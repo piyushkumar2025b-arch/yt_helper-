@@ -19,6 +19,7 @@ import {
   Check,
   Search,
   Bookmark,
+  FolderOpen,
   Cloud,
   LogIn,
   LogOut,
@@ -251,7 +252,7 @@ export const SidebarMenu: React.FC<SidebarMenuProps> = ({
     { id: 'transcript', label: 'Full Transcript', icon: List },
     { id: 'knowledge', label: 'Key Ideas & Words', icon: BookOpen },
     { id: 'research', label: 'Exact Resources & Sources', icon: Globe },
-    { id: 'lists', label: 'Saved Lists', icon: Bookmark },
+    { id: 'lists', label: 'Artifacts Folder', icon: FolderOpen },
     { id: 'scrape', label: 'Downloads & Info', icon: Database },
     { id: 'chat', label: 'Ask Anything', icon: MessageSquare },
   ] as const;
@@ -704,21 +705,44 @@ export const SidebarMenu: React.FC<SidebarMenuProps> = ({
           </div>
         </div>
 
-        {/* 6. Firebase Cloud Sync & Saved Summaries */}
+        {/* 6. Artifacts Folder & Firebase Cloud Sync */}
         <div className="space-y-1.5">
           <div className="flex items-center justify-between">
             <label className={`text-[10px] font-semibold uppercase tracking-wider ${themeConfig.textMuted} flex items-center gap-1`}>
-              <Cloud className="w-3 h-3 text-emerald-400" />
-              <span>Firebase Cloud Sync</span>
+              <FolderOpen className="w-3 h-3 text-amber-400" />
+              <span>Artifacts Folder</span>
             </label>
             {user ? (
-              <span className="text-[10px] font-semibold text-emerald-400">Connected</span>
+              <span className="text-[10px] font-semibold text-emerald-400">Firebase Synced</span>
             ) : (
-              <span className={`text-[10px] ${themeConfig.textMuted}`}>Local Cache</span>
+              <span className={`text-[10px] ${themeConfig.textMuted}`}>Local + Cloud</span>
             )}
           </div>
 
           <div className="space-y-1">
+            <button
+              type="button"
+              onClick={() => onSelectTab('lists')}
+              className={`w-full flex items-center justify-between gap-1.5 py-1.5 px-2.5 rounded text-[11px] font-semibold bg-amber-500/15 text-amber-400 hover:bg-amber-500/25 cursor-pointer transition-colors`}
+            >
+              <span className="flex items-center gap-1.5 truncate">
+                <FolderOpen className="w-3.5 h-3.5 shrink-0" />
+                <span className="truncate">Open Artifacts Folder</span>
+              </span>
+              <span className="text-[10px] opacity-80">→</span>
+            </button>
+
+            {onSaveCurrentToCloud && metadata && (
+              <button
+                type="button"
+                onClick={onSaveCurrentToCloud}
+                className={`w-full flex items-center justify-center gap-1.5 py-1 px-2.5 rounded text-[11px] font-medium bg-slate-500/10 hover:bg-slate-500/20 ${themeConfig.textSecondary} hover:${themeConfig.textPrimary} cursor-pointer transition-colors`}
+              >
+                <Plus className="w-3 h-3 text-indigo-400" />
+                <span>+ Save Video to Artifacts</span>
+              </button>
+            )}
+
             {user ? (
               <div className="flex items-center justify-between gap-1.5 px-2 py-1 rounded bg-emerald-500/10 text-emerald-400">
                 <span className="text-[10px] font-medium truncate">
@@ -746,17 +770,6 @@ export const SidebarMenu: React.FC<SidebarMenuProps> = ({
                   <span>Sign In to Sync Firebase</span>
                 </button>
               )
-            )}
-
-            {onSaveCurrentToCloud && metadata && (
-              <button
-                type="button"
-                onClick={onSaveCurrentToCloud}
-                className={`w-full flex items-center justify-center gap-1.5 py-1 px-2.5 rounded text-[11px] font-medium bg-slate-500/10 hover:bg-slate-500/20 ${themeConfig.textSecondary} hover:${themeConfig.textPrimary} cursor-pointer transition-colors`}
-              >
-                <Plus className="w-3 h-3 text-indigo-400" />
-                <span>Save Summary to Firebase</span>
-              </button>
             )}
 
             {savedSummaries.length > 0 && (

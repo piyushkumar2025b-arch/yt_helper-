@@ -753,7 +753,7 @@ export default function App() {
       }
       await addItemToUserList(targetList.id, item);
       setAppendNotice(
-        `Saved "${item.title.slice(0, 42)}" to ${currentUser ? 'Firebase' : `"${targetList.name}"`}`
+        `Saved "${item.title.slice(0, 42)}" to Artifacts Folder${currentUser ? ' (Synced to Firebase)' : ''}`
       );
       setTimeout(() => setAppendNotice(null), 4000);
     } catch {
@@ -1055,6 +1055,7 @@ export default function App() {
                 onOpenTypography={() => setIsTypographyOpen(true)}
                 onOpenKnowledge={() => setActiveTab('knowledge')}
                 onSaveToList={handleQuickSaveCurrentVideo}
+                onSaveItemToList={handleSaveItemToList}
                 onOpenLists={() => setActiveTab('lists')}
                 typography={typography}
                 isFullscreen={isFullscreen}
@@ -1150,6 +1151,10 @@ export default function App() {
                 currentVideoMetadata={metadata}
                 currentVideoUrl={currentUrl}
                 currentSummaryMarkdown={summary?.markdown || fullText}
+                currentTranscriptSegments={segments}
+                savedSummaries={savedSummaries}
+                customResources={customResources}
+                onRefreshCustomResources={setCustomResources}
                 onLoadSavedVideo={(url, savedMarkdown) => {
                   setActiveTab('summary');
                   handleFetchAndSummarize(url, savedMarkdown);
@@ -1162,7 +1167,7 @@ export default function App() {
         </main>
       </div>
 
-      {/* Floating Notification Toast when items are appended to Summary */}
+      {/* Floating Notification Toast when items are appended or saved to Artifacts Folder */}
       {appendNotice && (
         <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-4 py-2.5 rounded-xl bg-slate-900 border border-emerald-500/40 text-slate-100 shadow-2xl text-xs">
           <Check className="w-4 h-4 text-emerald-400 shrink-0" />
@@ -1170,12 +1175,14 @@ export default function App() {
           <button
             type="button"
             onClick={() => {
-              setActiveTab('summary');
+              setActiveTab(appendNotice.toLowerCase().includes('artifact') || appendNotice.toLowerCase().includes('saved') ? 'lists' : 'summary');
               setAppendNotice(null);
             }}
-            className="ml-2 font-semibold underline text-indigo-400 hover:text-indigo-300 cursor-pointer shrink-0"
+            className="ml-2 font-semibold underline text-amber-400 hover:text-amber-300 cursor-pointer shrink-0"
           >
-            View in Summary →
+            {appendNotice.toLowerCase().includes('artifact') || appendNotice.toLowerCase().includes('saved')
+              ? 'Open Artifacts Folder →'
+              : 'View in Summary →'}
           </button>
         </div>
       )}

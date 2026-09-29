@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { PanelLeft, Maximize2, Minimize2, SlidersHorizontal, Tv, Palette, Check, Cloud, LogIn, LogOut, Bookmark } from 'lucide-react';
+import { PanelLeft, Maximize2, Minimize2, SlidersHorizontal, Tv, Palette, Check, Cloud, LogIn, LogOut, FolderOpen } from 'lucide-react';
 import { User } from 'firebase/auth';
 import { OpenRouterModel, ThemeId } from '../types';
 import { APP_THEMES } from '../constants';
@@ -66,7 +66,7 @@ export const Header: React.FC<HeaderProps> = ({
     { id: 'transcript', label: 'Transcript' },
     { id: 'knowledge', label: 'Key Ideas & Words' },
     { id: 'research', label: 'Exact Resources & Sources' },
-    { id: 'lists', label: 'My Lists' },
+    { id: 'lists', label: 'Artifacts Folder' },
     { id: 'scrape', label: 'Downloads & Info' },
     { id: 'chat', label: 'Ask Anything' },
   ] as const;
@@ -115,17 +115,32 @@ export const Header: React.FC<HeaderProps> = ({
         </nav>
       )}
 
-      {/* Zone 3: Primary View Actions (Firebase Sync, Video, Theme Switcher, Toolbar & Fullscreen) */}
+      {/* Zone 3: Primary View Actions (Artifacts Folder, Firebase Sync, Video, Theme Switcher, Toolbar & Fullscreen) */}
       <div className="flex items-center gap-1">
+        {onSelectTab && (
+          <button
+            type="button"
+            onClick={() => onSelectTab('lists')}
+            className={`flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium rounded transition-colors cursor-pointer whitespace-nowrap ${
+              activeTab === 'lists'
+                ? 'bg-indigo-600 text-white font-semibold'
+                : `${themeConfig.textSecondary} hover:${themeConfig.textPrimary} hover:bg-slate-500/10`
+            }`}
+            title="Open Artifacts Folder (Saved Sources, Summaries, Books & Notes)"
+          >
+            <FolderOpen className="w-3 h-3 text-amber-400" />
+            <span>Artifacts</span>
+          </button>
+        )}
+
         {onQuickSaveToCloud && (
           <button
             type="button"
             onClick={onQuickSaveToCloud}
             className={`flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium rounded ${themeConfig.textSecondary} hover:${themeConfig.textPrimary} hover:bg-slate-500/10 transition-colors cursor-pointer whitespace-nowrap`}
-            title="Save Current Video Summary & Exact Resources to Firebase"
+            title="Save Current Video Summary & Sources to Artifacts Folder"
           >
-            <Bookmark className="w-3 h-3 text-indigo-400" />
-            <span className="hidden sm:inline">Save</span>
+            <span>+ Save</span>
           </button>
         )}
 

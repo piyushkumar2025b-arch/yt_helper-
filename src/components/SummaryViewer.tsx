@@ -26,6 +26,7 @@ import {
   Search,
   Sparkles,
   Link2,
+  FolderOpen,
 } from 'lucide-react';
 import { speechService, SpeechItem, tokenizeSpeechWords } from '../services/speechService';
 import {
@@ -65,6 +66,14 @@ interface SummaryViewerProps {
   onOpenTypography?: () => void;
   onOpenKnowledge?: () => void;
   onSaveToList?: () => void;
+  onSaveItemToList?: (item: {
+    itemType: 'video' | 'summary' | 'book' | 'article' | 'note';
+    title: string;
+    url?: string;
+    subtitle?: string;
+    content?: string;
+    notes?: string;
+  }) => void;
   onOpenLists?: () => void;
   typography?: TypographyConfig;
   isFullscreen?: boolean;
@@ -296,6 +305,7 @@ export const SummaryViewer: React.FC<SummaryViewerProps> = ({
   onOpenTypography,
   onOpenKnowledge,
   onSaveToList,
+  onSaveItemToList,
   onOpenLists,
   typography,
   isFullscreen = false,
@@ -331,6 +341,7 @@ export const SummaryViewer: React.FC<SummaryViewerProps> = ({
   const [newResType, setNewResType] = useState<ExactVideoResource['type']>('Book / Publication');
   const [newResDesc, setNewResDesc] = useState('');
   const [appendedResIds, setAppendedResIds] = useState<Set<string>>(new Set());
+  const [savedArtifactResIds, setSavedArtifactResIds] = useState<Set<string>>(new Set());
 
   const exactResources = useMemo(() => {
     const extracted = extractExactVideoResources(
@@ -1017,10 +1028,22 @@ export const SummaryViewer: React.FC<SummaryViewerProps> = ({
                 type="button"
                 onClick={onSaveToList}
                 className={`flex items-center gap-1 px-1.5 py-0.5 rounded font-medium ${themeConfig.textSecondary} hover:${themeConfig.textPrimary} hover:bg-slate-500/10 transition-colors cursor-pointer whitespace-nowrap`}
-                title="Save this video & summary to your list"
+                title="Save this video & summary to your Artifacts Folder"
               >
                 <Plus className="w-3 h-3 opacity-75" />
-                <span>Save</span>
+                <span>+ Save to Artifacts</span>
+              </button>
+            )}
+
+            {onOpenLists && (
+              <button
+                type="button"
+                onClick={onOpenLists}
+                className="flex items-center gap-1 px-1.5 py-0.5 rounded font-semibold bg-amber-500/15 text-amber-400 hover:bg-amber-500/25 transition-colors cursor-pointer whitespace-nowrap"
+                title="Open your Artifacts Folder (Saved Sources, Summaries, Books & Notes)"
+              >
+                <FolderOpen className="w-3 h-3" />
+                <span>Artifacts Folder</span>
               </button>
             )}
 
@@ -1376,6 +1399,34 @@ export const SummaryViewer: React.FC<SummaryViewerProps> = ({
                   <span>{isAddResourceOpen ? 'Close Form' : '+ Add Exact Resource'}</span>
                 </button>
 
+                {onSaveItemToList && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      exactResources.forEach((r) => {
+                        onSaveItemToList({
+                          itemType: r.type === 'Book / Publication' ? 'book' : 'article',
+                          title: r.title,
+                          url: r.primaryUrl,
+                          subtitle: `${r.type}${r.authorOrCreator ? ` · ${r.authorOrCreator}` : ''}${
+                            r.formattedTime ? ` · [${r.formattedTime}]` : ''
+                          }`,
+                          content: r.description,
+                          notes: r.exactQuote || '',
+                        });
+                      });
+                      const nextSet = new Set(savedArtifactResIds);
+                      exactResources.forEach((r) => nextSet.add(r.id));
+                      setSavedArtifactResIds(nextSet);
+                    }}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs font-semibold bg-amber-500/15 text-amber-400 hover:bg-amber-500/25 cursor-pointer transition-colors"
+                    title="Save all exact video resources into your Artifacts Folder"
+                  >
+                    <FolderOpen className="w-3.5 h-3.5" />
+                    <span>+ Save All to Artifacts</span>
+                  </button>
+                )}
+
                 {onAppendCustomMarkdown && (
                   <button
                     type="button"
@@ -1540,6 +1591,38 @@ export const SummaryViewer: React.FC<SummaryViewerProps> = ({
                           <span>{res.primaryLabel}</span>
                           <ExternalLink className="w-2.5 h-2.5" />
                         </a>
+
+                        {onSaveItemToList && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              onSaveItemToList({
+                                itemType: res.type === 'Book / Publication' ? 'book' : 'article',
+                                title: res.title,
+                                url: res.primaryUrl,
+                                subtitle: `${res.type}${res.authorOrCreator ? ` · ${res.authorOrCreator}` : ''}${
+                                  res.formattedTime ? ` · [${res.formattedTime}]` : ''
+                                }`,
+                                content: res.description,
+                                notes: res.exactQuote || '',
+                              });
+                              setSavedArtifactResIds((prev) => new Set(prev).add(res.id));
+                            }}
+                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium cursor-pointer transition-colors ${
+                              savedArtifactResIds.has(res.id)
+                                ? 'text-amber-400 bg-amber-500/15 font-semibold'
+                                : 'text-amber-400/90 hover:text-amber-300 bg-amber-500/10 hover:bg-amber-500/20'
+                            }`}
+                            title="Save this resource to your Artifacts Folder"
+                          >
+                            {savedArtifactResIds.has(res.id) ? (
+                              <Check className="w-2.5 h-2.5" />
+                            ) : (
+                              <FolderOpen className="w-2.5 h-2.5" />
+                            )}
+                            <span>{savedArtifactResIds.has(res.id) ? 'Saved in Artifacts' : '+ Save to Artifacts'}</span>
+                          </button>
+                        )}
 
                         {onAppendCustomMarkdown && (
                           <button
