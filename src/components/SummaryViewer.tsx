@@ -1,0 +1,1261 @@
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import {
+  Copy,
+  Check,
+  Download,
+  Play,
+  Pause,
+  RefreshCw,
+  Clock,
+  ChevronDown,
+  ArrowRightCircle,
+  MoreHorizontal,
+  Maximize2,
+  Minimize2,
+  Globe,
+  ExternalLink,
+  Volume2,
+  Type,
+  BookOpen,
+  X,
+  SlidersHorizontal,
+  ArrowDownCircle,
+  Plus,
+  Search,
+} from 'lucide-react';
+import { speechService, SpeechItem, tokenizeSpeechWords } from '../services/speechService';
+import { SummaryResult, SummaryType, ThemeId, TypographyConfig } from '../types';
+import { SUMMARY_PRESETS, APP_THEMES } from '../constants';
+import { getTypographyStyles, getContentWidthClass } from './TypographySettingsModal';
+
+interface SummaryViewerProps {
+  summary: SummaryResult | null;
+  isLoading: boolean;
+  isContinuing?: boolean;
+  onRegenerate: (type: SummaryType) => void;
+  onContinueSummary?: () => void;
+  onSeekToTimestamp: (seconds: number) => void;
+  transcriptText?: string;
+  videoTitle?: string;
+  openRouterKey?: string;
+  selectedModelId?: string;
+  currentTheme?: ThemeId;
+  onOpenVoiceSettings?: () => void;
+  onOpenResearch?: () => void;
+  onOpenTypography?: () => void;
+  onOpenKnowledge?: () => void;
+  onSaveToList?: () => void;
+  onOpenLists?: () => void;
+  typography?: TypographyConfig;
+  isFullscreen?: boolean;
+  onToggleFullscreen?: () => void;
+  isOptionsOpen?: boolean;
+  onToggleOptions?: () => void;
+}
+
+// Helper to strip any emojis or pictographs from text for a strictly formal presentation
+function stripEmojis(text: string): string {
+  return text.replace(/[\p{Emoji_Presentation}\p{Extended_Pictographic}]/gu, '').replace(/#[ \t]+/g, (m) => m);
+}
+
+interface GranularMarkdownBlock {
+  raw: string;
+  cleanText: string;
+  speechIdx: number;
+  blockType: 'h1' | 'h2' | 'h3' | 'ul-li' | 'ol-li' | 'blockquote' | 'img' | 'hr' | 'p';
+  listNumber?: string;
+  timestampBadge?: string;
+}
+
+function cleanLineForSpeech(line: string): { cleanText: string; timestampBadge?: string } {
+  let timestampBadge: string | undefined;
+  const tsMatch = line.match(/\[(\d{1,2}:\d{2}(?::\d{2})?)\]/);
+  if (tsMatch) {
+    timestampBadge = tsMatch[0];
+  }
+
+  const cleanText = line
+    .replace(/!\[[^\]]*\]\([^\)]+\)/g, '')
+    .replace(/^#{1,6}\s+/, '')
+    .replace(/^>\s*/, '')
+    .replace(/^[-*+]\s+/, '')
+    .replace(/^\d+\.\s+/, '')
+    .replace(/\*\*?\[\d{1,2}:\d{2}(?::\d{2})?\]\*\*?/g, '')
+    .replace(/\[\d{1,2}:\d{2}(?::\d{2})?\]/g, '')
+    .replace(/\[([^\]]+)\]\([^\)]+\)/g, '$1')
+    .replace(/\*\*|__/g, '')
+    .replace(/\*|_/g, '')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  return { cleanText, timestampBadge };
+}
+
+function parseGranularMarkdown(markdown: string): {
+  blocks: GranularMarkdownBlock[];
+  speechItems: SpeechItem[];
+} {
+  const lines = markdown.split('\n');
+  const blocks: GranularMarkdownBlock[] = [];
+  const speechItems: SpeechItem[] = [];
+
+  let paragraphBuffer: string[] = [];
+
+  const flushParagraph = () => {
+    if (paragraphBuffer.length === 0) return;
+    const raw = paragraphBuffer.join('\n').trim();
+    paragraphBuffer = [];
+    if (!raw) return;
+
+    const { cleanText, timestampBadge } = cleanLineForSpeech(raw);
+    if (cleanText.length > 0) {
+      const sIdx = speechItems.length;
+      speechItems.push({
+        id: sIdx,
+        text: cleanText,
+        label: cleanText.slice(0, 42),
+      });
+      blocks.push({
+        raw,
+        cleanText,
+        speechIdx: sIdx,
+        blockType: 'p',
+        timestampBadge,
+      });
+    } else {
+      blocks.push({ raw, cleanText: '', speechIdx: -1, blockType: 'p' });
+    }
+  };
+
+  for (const rawLine of lines) {
+    const trimmed = rawLine.trim();
+
+    if (!trimmed) {
+      flushParagraph();
+      continue;
+    }
+
+    // Horizontal rule
+    if (/^(-{3,}|\*{3,}|_{3,})$/.test(trimmed)) {
+      flushParagraph();
+      blocks.push({ raw: trimmed, cleanText: '', speechIdx: -1, blockType: 'hr' });
+      continue;
+    }
+
+    // Standalone image line
+    if (/^!\[[^\]]*\]\([^\)]+\)$/.test(trimmed)) {
+      flushParagraph();
+      blocks.push({ raw: trimmed, cleanText: '', speechIdx: -1, blockType: 'img' });
+      continue;
+    }
+
+    // Headings
+    const hMatch = trimmed.match(/^(#{1,6})\s+(.*)$/);
+    if (hMatch) {
+      flushParagraph();
+      const level = hMatch[1].length;
+      const { cleanText, timestampBadge } = cleanLineForSpeech(trimmed);
+      const sIdx = cleanText ? speechItems.length : -1;
+      if (cleanText) {
+        speechItems.push({
+          id: sIdx,
+          text: cleanText,
+          label: cleanText.slice(0, 42),
+        });
+      }
+      blocks.push({
+        raw: trimmed,
+        cleanText,
+        speechIdx: sIdx,
+        blockType: level === 1 ? 'h1' : level === 2 ? 'h2' : 'h3',
+        timestampBadge,
+      });
+      continue;
+    }
+
+    // Unordered list item
+    if (/^[-*+]\s+/.test(trimmed)) {
+      flushParagraph();
+      const { cleanText, timestampBadge } = cleanLineForSpeech(trimmed);
+      const sIdx = cleanText ? speechItems.length : -1;
+      if (cleanText) {
+        speechItems.push({
+          id: sIdx,
+          text: cleanText,
+          label: cleanText.slice(0, 42),
+        });
+      }
+      blocks.push({
+        raw: trimmed,
+        cleanText,
+        speechIdx: sIdx,
+        blockType: 'ul-li',
+        timestampBadge,
+      });
+      continue;
+    }
+
+    // Ordered list item
+    const olMatch = trimmed.match(/^(\d+\.)\s+/);
+    if (olMatch) {
+      flushParagraph();
+      const { cleanText, timestampBadge } = cleanLineForSpeech(trimmed);
+      const sIdx = cleanText ? speechItems.length : -1;
+      if (cleanText) {
+        speechItems.push({
+          id: sIdx,
+          text: cleanText,
+          label: cleanText.slice(0, 42),
+        });
+      }
+      blocks.push({
+        raw: trimmed,
+        cleanText,
+        speechIdx: sIdx,
+        blockType: 'ol-li',
+        listNumber: olMatch[1],
+        timestampBadge,
+      });
+      continue;
+    }
+
+    // Blockquote
+    if (/^>\s*/.test(trimmed)) {
+      flushParagraph();
+      const { cleanText, timestampBadge } = cleanLineForSpeech(trimmed);
+      const sIdx = cleanText ? speechItems.length : -1;
+      if (cleanText) {
+        speechItems.push({
+          id: sIdx,
+          text: cleanText,
+          label: cleanText.slice(0, 42),
+        });
+      }
+      blocks.push({
+        raw: trimmed,
+        cleanText,
+        speechIdx: sIdx,
+        blockType: 'blockquote',
+        timestampBadge,
+      });
+      continue;
+    }
+
+    paragraphBuffer.push(trimmed);
+  }
+
+  flushParagraph();
+  return { blocks, speechItems };
+}
+
+export const SummaryViewer: React.FC<SummaryViewerProps> = ({
+  summary,
+  isLoading,
+  isContinuing = false,
+  onRegenerate,
+  onContinueSummary,
+  onSeekToTimestamp,
+  transcriptText = '',
+  videoTitle = '',
+  openRouterKey = '',
+  selectedModelId = 'meta-llama/llama-3.3-70b-instruct:free',
+  currentTheme = 'midnight',
+  onOpenVoiceSettings,
+  onOpenResearch,
+  onOpenTypography,
+  onOpenKnowledge,
+  onSaveToList,
+  onOpenLists,
+  typography,
+  isFullscreen = false,
+  onToggleFullscreen,
+  isOptionsOpen = true,
+  onToggleOptions,
+}) => {
+  const [copied, setCopied] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
+  const [speakingIndex, setSpeakingIndex] = useState(-1);
+  const [activeWordIndex, setActiveWordIndex] = useState(-1);
+  const [autoScroll, setAutoScroll] = useState<boolean>(speechService.getAutoScroll());
+  const [activePreset, setActivePreset] = useState<SummaryType>(summary?.summaryType || 'massive');
+
+  const [isActionsOpen, setIsActionsOpen] = useState(false);
+  const [isStyleOpen, setIsStyleOpen] = useState(false);
+  const [targetLang, setTargetLang] = useState<string>('en');
+  const [translatedMarkdown, setTranslatedMarkdown] = useState<string | null>(null);
+  const [isTranslating, setIsTranslating] = useState<boolean>(false);
+  const [summarySearch, setSummarySearch] = useState<string>('');
+
+  // Deep Dive Expansion state
+  const [isExpanding, setIsExpanding] = useState(false);
+  const [expandTopic, setExpandTopic] = useState('');
+  const [expansionResults, setExpansionResults] = useState<Array<{ topic: string; content: string }>>([]);
+  const [isExpandModalOpen, setIsExpandModalOpen] = useState(false);
+  const [expandError, setExpandError] = useState<string | null>(null);
+
+  const actionsRef = useRef<HTMLDivElement>(null);
+  const styleRef = useRef<HTMLDivElement>(null);
+  const blockRefs = useRef<Record<number, HTMLDivElement | null>>({});
+  const activeWordRef = useRef<HTMLSpanElement | null>(null);
+  const lastWordTopRef = useRef<number>(0);
+
+  const themeConfig = APP_THEMES[currentTheme] || APP_THEMES.midnight;
+
+  useEffect(() => {
+    if (summary?.summaryType) {
+      setActivePreset(summary.summaryType);
+    }
+  }, [summary?.summaryType]);
+
+  useEffect(() => {
+    const handleOutsideClick = (e: MouseEvent) => {
+      if (actionsRef.current && !actionsRef.current.contains(e.target as Node)) {
+        setIsActionsOpen(false);
+      }
+      if (styleRef.current && !styleRef.current.contains(e.target as Node)) {
+        setIsStyleOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleOutsideClick);
+    return () => document.removeEventListener('mousedown', handleOutsideClick);
+  }, []);
+
+  // Subscribe to speech service state, item start, word boundaries, and auto-scroll
+  useEffect(() => {
+    const unsubState = speechService.subscribeStateChange((playing, paused, curIdx) => {
+      setIsSpeaking(playing);
+      setIsPaused(paused);
+      setSpeakingIndex(curIdx);
+      if (!playing) {
+        setActiveWordIndex(-1);
+      }
+    });
+
+    const unsubStart = speechService.subscribeItemStart((idx) => {
+      setSpeakingIndex(idx);
+      setActiveWordIndex(0);
+      if (speechService.getAutoScroll()) {
+        const el = blockRefs.current[idx];
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }
+    });
+
+    const unsubWord = speechService.subscribeWordBoundary((progress) => {
+      setSpeakingIndex(progress.itemIndex);
+      setActiveWordIndex(progress.wordIndex);
+      if (speechService.getAutoScroll()) {
+        requestAnimationFrame(() => {
+          const wordEl = activeWordRef.current;
+          if (wordEl) {
+            const rect = wordEl.getBoundingClientRect();
+            const vh = window.innerHeight;
+            const movedLine = Math.abs(rect.top - lastWordTopRef.current) > 12;
+            const outOfCenterBand = rect.top < vh * 0.24 || rect.bottom > vh * 0.72;
+            if (movedLine || outOfCenterBand) {
+              lastWordTopRef.current = rect.top;
+              wordEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+          }
+        });
+      }
+    });
+
+    const unsubScroll = speechService.subscribeAutoScroll((enabled) => {
+      setAutoScroll(enabled);
+    });
+
+    return () => {
+      unsubState();
+      unsubStart();
+      unsubWord();
+      unsubScroll();
+    };
+  }, []);
+
+  useEffect(() => {
+    setTargetLang('en');
+    setTranslatedMarkdown(null);
+  }, [summary?.markdown]);
+
+  const handleSelectLanguage = async (langCode: string) => {
+    setTargetLang(langCode);
+    if (langCode === 'en' || !summary?.markdown) {
+      setTranslatedMarkdown(null);
+      return;
+    }
+    setIsTranslating(true);
+    try {
+      const res = await fetch('/api/translate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: stripEmojis(summary.markdown),
+          targetLang: langCode,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data.translatedText) {
+        setTranslatedMarkdown(data.translatedText);
+      }
+    } catch {
+      // ignore translation error
+    } finally {
+      setIsTranslating(false);
+    }
+  };
+
+  const formalMarkdown = useMemo(() => {
+    if (translatedMarkdown && targetLang !== 'en') {
+      return stripEmojis(translatedMarkdown);
+    }
+    if (!summary?.markdown) return '';
+    return stripEmojis(summary.markdown);
+  }, [summary?.markdown, translatedMarkdown, targetLang]);
+
+  const { parsedBlocks, summarySpeechItems } = useMemo(() => {
+    if (!formalMarkdown) {
+      return { parsedBlocks: [] as GranularMarkdownBlock[], summarySpeechItems: [] as SpeechItem[] };
+    }
+    const { blocks, speechItems } = parseGranularMarkdown(formalMarkdown);
+    return { parsedBlocks: blocks, summarySpeechItems: speechItems };
+  }, [formalMarkdown]);
+
+  const handleToggleAudio = () => {
+    if (isSpeaking && !isPaused) {
+      speechService.pause();
+      return;
+    }
+    if (isSpeaking && isPaused) {
+      speechService.resume();
+      return;
+    }
+    speechService.playItems(summarySpeechItems, speakingIndex >= 0 ? speakingIndex : 0);
+  };
+
+  const handlePlayFromBlock = (speechIdx: number) => {
+    if (speechIdx < 0) return;
+    speechService.playItems(summarySpeechItems, speechIdx);
+  };
+
+  const handleCopy = async () => {
+    if (!formalMarkdown) return;
+    try {
+      await navigator.clipboard.writeText(formalMarkdown);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // fallback
+    }
+  };
+
+  const handleDownload = () => {
+    if (!formalMarkdown) return;
+    const blob = new Blob([formalMarkdown], { type: 'text/markdown;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${(videoTitle || 'summary').replace(/[^a-z0-9]/gi, '_').toLowerCase()}.md`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const parseTimestampToSeconds = (ts: string): number => {
+    const clean = ts.replace(/[\[\]]/g, '');
+    const parts = clean.split(':').map((p) => parseInt(p, 10));
+    if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
+      return parts[0] * 60 + parts[1];
+    }
+    if (parts.length === 3 && !isNaN(parts[0]) && !isNaN(parts[1]) && !isNaN(parts[2])) {
+      return parts[0] * 3600 + parts[1] * 60 + parts[2];
+    }
+    return 0;
+  };
+
+  const handleDeepDive = async (topicToExpand: string) => {
+    if (!topicToExpand.trim()) return;
+    setIsExpanding(true);
+    setExpandError(null);
+
+    try {
+      const res = await fetch('/api/deep-dive', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          topic: topicToExpand,
+          transcript: transcriptText,
+          title: videoTitle,
+          openRouterKey,
+          model: selectedModelId,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to expand section.');
+
+      setExpansionResults((prev) => [
+        ...prev,
+        { topic: topicToExpand, content: stripEmojis(data.expansion || '') },
+      ]);
+      setExpandTopic('');
+      setIsExpandModalOpen(false);
+    } catch (e: any) {
+      setExpandError(e.message || 'Error expanding section');
+    } finally {
+      setIsExpanding(false);
+    }
+  };
+
+  const currentPresetObj = SUMMARY_PRESETS.find((p) => p.id === activePreset) || SUMMARY_PRESETS[0];
+
+  const markdownComponents = useMemo(
+    () => ({
+      strong: ({ children, ...props }: any) => {
+        const text = Array.isArray(children)
+          ? children.map((c) => (typeof c === 'string' ? c : '')).join('')
+          : String(children || '');
+        const timestampMatch = text.match(/\[(\d{1,2}:\d{2}(?::\d{2})?)\]/);
+        if (timestampMatch) {
+          const seconds = parseTimestampToSeconds(timestampMatch[0]);
+          return (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onSeekToTimestamp(seconds);
+              }}
+              className="inline-flex items-center gap-1 font-mono text-xs font-semibold text-indigo-400 hover:underline cursor-pointer mr-1.5 align-baseline tabular-nums"
+              title={`Jump to ${timestampMatch[1]}`}
+            >
+              <Clock className="w-3 h-3 opacity-60" />
+              <span>{text}</span>
+            </button>
+          );
+        }
+        return (
+          <strong className="font-semibold" {...props}>
+            {children}
+          </strong>
+        );
+      },
+      h1: ({ children, ...props }: any) => (
+        <h1 className="text-2xl sm:text-3xl font-bold mt-6 mb-3" {...props}>
+          {children}
+        </h1>
+      ),
+      h2: ({ children, ...props }: any) => (
+        <h2
+          className={`text-xl sm:text-2xl font-bold mt-8 mb-3 pb-2 border-b ${themeConfig.borderLight}`}
+          {...props}
+        >
+          {children}
+        </h2>
+      ),
+      h3: ({ children, ...props }: any) => (
+        <h3 className="text-base sm:text-lg font-semibold mt-6 mb-2 text-indigo-400" {...props}>
+          {children}
+        </h3>
+      ),
+      p: ({ children, ...props }: any) => (
+        <p className="mb-3 leading-relaxed opacity-95" {...props}>
+          {children}
+        </p>
+      ),
+      ul: ({ children, ...props }: any) => (
+        <ul className="list-disc pl-6 mb-2 space-y-1.5 opacity-95" {...props}>
+          {children}
+        </ul>
+      ),
+      ol: ({ children, ...props }: any) => (
+        <ol className="list-decimal pl-6 mb-2 space-y-1.5 opacity-95" {...props}>
+          {children}
+        </ol>
+      ),
+      blockquote: ({ children, ...props }: any) => (
+        <blockquote
+          className="border-l-2 border-indigo-500/60 pl-5 py-1 my-3 italic opacity-90"
+          {...props}
+        >
+          {children}
+        </blockquote>
+      ),
+      img: ({ src, alt, ...props }: any) => (
+        <span className="my-6 block text-center">
+          <img
+            src={src}
+            alt={alt || 'Figure'}
+            referrerPolicy="no-referrer"
+            className="rounded-lg max-h-[520px] w-auto max-w-full object-contain mx-auto"
+            loading="lazy"
+            {...props}
+          />
+          {alt && (
+            <span className="text-xs text-slate-400 mt-2 italic text-center block">
+              {alt}
+            </span>
+          )}
+        </span>
+      ),
+      a: ({ children, href, ...props }: any) => (
+        <a
+          href={href}
+          target="_blank"
+          rel="noreferrer"
+          className="text-indigo-400 hover:text-indigo-300 underline font-medium inline-flex items-center gap-1"
+          {...props}
+        >
+          <span>{children}</span>
+          <ExternalLink className="w-3 h-3 opacity-60 inline shrink-0" />
+        </a>
+      ),
+    }),
+    [themeConfig.borderLight, onSeekToTimestamp]
+  );
+
+  /**
+   * Renders the active block's words directly inline inside its semantic element (h1, h2, h3, li, blockquote, p)
+   * so the exact spoken word lights up in-place with zero duplicate text boxes.
+   */
+  const renderActiveSynchronizedBlock = (block: GranularMarkdownBlock) => {
+    const words = tokenizeSpeechWords(block.cleanText);
+    const tsBadge = block.timestampBadge ? (
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          onSeekToTimestamp(parseTimestampToSeconds(block.timestampBadge!));
+        }}
+        className="inline-flex items-center gap-1 font-mono text-xs font-semibold text-indigo-400 hover:underline cursor-pointer mr-2 align-baseline tabular-nums"
+      >
+        <Clock className="w-3 h-3 opacity-60" />
+        <span>{block.timestampBadge}</span>
+      </button>
+    ) : null;
+
+    const wordSpans = words.map((word, wIdx) => {
+      const isCurrentWord = wIdx === activeWordIndex;
+      const isPastWord = wIdx < activeWordIndex;
+      return (
+        <React.Fragment key={wIdx}>
+          <span
+            ref={isCurrentWord ? activeWordRef : undefined}
+            className={`inline-block rounded transition-colors duration-75 ${
+              isCurrentWord
+                ? 'bg-indigo-500 text-white font-semibold px-1.5 py-0.5 shadow-sm'
+                : isPastWord
+                ? `${themeConfig.textPrimary}`
+                : `${themeConfig.textSecondary} opacity-85`
+            }`}
+          >
+            {word}
+          </span>{' '}
+        </React.Fragment>
+      );
+    });
+
+    if (block.blockType === 'h1') {
+      return (
+        <h1 className="text-2xl sm:text-3xl font-bold mt-6 mb-3">
+          {tsBadge}
+          {wordSpans}
+        </h1>
+      );
+    }
+    if (block.blockType === 'h2') {
+      return (
+        <h2 className={`text-xl sm:text-2xl font-bold mt-8 mb-3 pb-2 border-b ${themeConfig.borderLight}`}>
+          {tsBadge}
+          {wordSpans}
+        </h2>
+      );
+    }
+    if (block.blockType === 'h3') {
+      return (
+        <h3 className="text-base sm:text-lg font-semibold mt-6 mb-2 text-indigo-400">
+          {tsBadge}
+          {wordSpans}
+        </h3>
+      );
+    }
+    if (block.blockType === 'ul-li') {
+      return (
+        <ul className="list-disc pl-6 mb-2">
+          <li className="leading-relaxed">
+            {tsBadge}
+            {wordSpans}
+          </li>
+        </ul>
+      );
+    }
+    if (block.blockType === 'ol-li') {
+      return (
+        <div className="flex items-baseline gap-2 pl-2 mb-2 leading-relaxed">
+          <span className="font-semibold text-indigo-400 shrink-0">{block.listNumber || '1.'}</span>
+          <div>
+            {tsBadge}
+            {wordSpans}
+          </div>
+        </div>
+      );
+    }
+    if (block.blockType === 'blockquote') {
+      return (
+        <blockquote className="border-l-2 border-indigo-500 pl-5 py-1 my-3 italic">
+          {tsBadge}
+          {wordSpans}
+        </blockquote>
+      );
+    }
+    return (
+      <p className="mb-3 leading-relaxed">
+        {tsBadge}
+        {wordSpans}
+      </p>
+    );
+  };
+
+  if (isLoading) {
+    return (
+      <div className="py-28 flex flex-col items-center justify-center text-center space-y-3">
+        <RefreshCw className="w-5 h-5 animate-spin text-indigo-500 opacity-80" />
+        <p className={`text-sm font-medium ${themeConfig.textPrimary}`}>
+          Writing your video summary...
+        </p>
+      </div>
+    );
+  }
+
+  if (!summary) {
+    return (
+      <div className="py-28 flex flex-col items-center justify-center text-center space-y-2">
+        <p className={`text-sm font-medium ${themeConfig.textPrimary}`}>No video selected yet</p>
+        <p className={`text-xs ${themeConfig.textMuted}`}>
+          Paste a YouTube link or search for a video in the left sidebar to get started.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="w-full space-y-2.5">
+      {/* Ultra-Compact Single-Line Options Strip */}
+      {isOptionsOpen ? (
+        <div className={`flex items-center justify-between gap-2 pb-1.5 border-b ${themeConfig.borderLight} flex-wrap text-[11px]`}>
+          {/* Left: Document Title + Compact Word Count */}
+          <div className="flex items-center gap-2 min-w-0 flex-1">
+            <h1 className={`text-sm sm:text-base font-bold tracking-tight truncate ${themeConfig.textPrimary}`}>
+              {videoTitle || 'Video Summary'}
+            </h1>
+            <span className={`hidden xl:inline text-[10px] ${themeConfig.textMuted} tabular-nums shrink-0`}>
+              ({formalMarkdown.split(/\s+/).filter(Boolean).length.toLocaleString()}w · ~{Math.max(1, Math.round((formalMarkdown.split(/\s+/).length || 200) / 220))}m)
+            </span>
+          </div>
+
+          {/* Right: Ultra-compact single-row controls */}
+          <div className="flex items-center gap-1 flex-wrap">
+            {/* Compact Section Jump Dropdown */}
+            {parsedBlocks.some((b) => b.blockType === 'h2') && (
+              <select
+                defaultValue=""
+                onChange={(e) => {
+                  const idx = e.target.value;
+                  if (idx !== '') {
+                    const el = document.getElementById(`summary-block-${idx}`);
+                    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                  }
+                }}
+                className={`px-1.5 py-0.5 rounded bg-slate-500/10 ${themeConfig.textSecondary} hover:${themeConfig.textPrimary} cursor-pointer focus:outline-none max-w-[145px] truncate`}
+                title="Jump directly to any section"
+              >
+                <option value="" className="bg-slate-900 text-white">Jump to section...</option>
+                {parsedBlocks
+                  .map((b, idx) => ({ b, idx }))
+                  .filter(({ b }) => b.blockType === 'h2')
+                  .map(({ b, idx }) => (
+                    <option key={idx} value={String(idx)} className="bg-slate-900 text-white">
+                      {b.cleanText}
+                    </option>
+                  ))}
+              </select>
+            )}
+
+            {/* Compact Find Input */}
+            <div className="relative">
+              <Search className="w-2.5 h-2.5 absolute left-2 top-1/2 -translate-y-1/2 opacity-40 pointer-events-none" />
+              <input
+                type="text"
+                value={summarySearch}
+                onChange={(e) => setSummarySearch(e.target.value)}
+                placeholder="Find..."
+                className={`pl-5 pr-4 py-0.5 rounded bg-slate-500/10 ${themeConfig.textPrimary} placeholder:opacity-40 focus:outline-none w-24 sm:w-28`}
+              />
+              {summarySearch && (
+                <button
+                  type="button"
+                  onClick={() => setSummarySearch('')}
+                  className="absolute right-1 top-1/2 -translate-y-1/2 opacity-60 hover:opacity-100 cursor-pointer"
+                >
+                  <X className="w-2.5 h-2.5" />
+                </button>
+              )}
+            </div>
+
+            {onContinueSummary && (
+              <button
+                onClick={onContinueSummary}
+                disabled={isContinuing}
+                className={`flex items-center gap-1 px-1.5 py-0.5 rounded font-medium transition-colors cursor-pointer whitespace-nowrap ${
+                  summary.isTruncated
+                    ? `${themeConfig.accentBg} ${themeConfig.accent} font-semibold`
+                    : `${themeConfig.textSecondary} hover:${themeConfig.textPrimary} hover:bg-slate-500/10`
+                }`}
+                title="Write more details"
+              >
+                <ArrowRightCircle className="w-3 h-3" />
+                <span>{isContinuing ? 'Writing...' : 'More'}</span>
+              </button>
+            )}
+
+            <button
+              onClick={handleToggleAudio}
+              className={`flex items-center gap-1 px-2 py-0.5 rounded font-medium transition-colors cursor-pointer whitespace-nowrap ${
+                isSpeaking
+                  ? 'bg-indigo-600 text-white font-semibold'
+                  : `${themeConfig.textSecondary} hover:${themeConfig.textPrimary} hover:bg-slate-500/10`
+              }`}
+              title={isSpeaking && !isPaused ? 'Pause Audio' : 'Read Aloud'}
+            >
+              {isSpeaking && !isPaused ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3" />}
+              <span>{isSpeaking && !isPaused ? 'Pause' : 'Listen'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => speechService.setAutoScroll(!autoScroll)}
+              className={`flex items-center gap-1 px-1.5 py-0.5 rounded font-medium transition-colors cursor-pointer whitespace-nowrap ${
+                autoScroll
+                  ? `${themeConfig.accentBg} ${themeConfig.accent} font-semibold`
+                  : `${themeConfig.textSecondary} hover:${themeConfig.textPrimary} hover:bg-slate-500/10`
+              }`}
+              title="Toggle Auto-Scroll while listening"
+            >
+              <ArrowDownCircle className="w-3 h-3" />
+              <span className="hidden sm:inline">{autoScroll ? 'Scroll: On' : 'Scroll: Off'}</span>
+            </button>
+
+            {onOpenVoiceSettings && (
+              <button
+                type="button"
+                onClick={onOpenVoiceSettings}
+                className={`flex items-center gap-1 px-1.5 py-0.5 rounded font-medium ${themeConfig.textSecondary} hover:${themeConfig.textPrimary} hover:bg-slate-500/10 transition-colors cursor-pointer whitespace-nowrap`}
+                title="Voice & Speed"
+              >
+                <Volume2 className="w-3 h-3 opacity-75" />
+                <span className="hidden md:inline">Voice</span>
+              </button>
+            )}
+
+            {/* Live Neural Translation Selector */}
+            <select
+              value={targetLang}
+              onChange={(e) => handleSelectLanguage(e.target.value)}
+              disabled={isTranslating}
+              className={`px-1.5 py-0.5 rounded bg-slate-500/10 ${themeConfig.textSecondary} hover:${themeConfig.textPrimary} cursor-pointer focus:outline-none`}
+              title="Translate Summary"
+            >
+              <option value="en" className="bg-slate-900 text-white">
+                {isTranslating ? '...' : 'EN'}
+              </option>
+              <option value="es" className="bg-slate-900 text-white">ES</option>
+              <option value="fr" className="bg-slate-900 text-white">FR</option>
+              <option value="de" className="bg-slate-900 text-white">DE</option>
+              <option value="hi" className="bg-slate-900 text-white">HI</option>
+              <option value="ja" className="bg-slate-900 text-white">JA</option>
+              <option value="ko" className="bg-slate-900 text-white">KO</option>
+              <option value="zh-CN" className="bg-slate-900 text-white">ZH</option>
+              <option value="ar" className="bg-slate-900 text-white">AR</option>
+              <option value="pt" className="bg-slate-900 text-white">PT</option>
+              <option value="it" className="bg-slate-900 text-white">IT</option>
+              <option value="ru" className="bg-slate-900 text-white">RU</option>
+              <option value="tr" className="bg-slate-900 text-white">TR</option>
+              <option value="nl" className="bg-slate-900 text-white">NL</option>
+            </select>
+
+            <button
+              onClick={handleCopy}
+              className={`flex items-center gap-1 px-1.5 py-0.5 rounded font-medium ${themeConfig.textSecondary} hover:${themeConfig.textPrimary} hover:bg-slate-500/10 transition-colors cursor-pointer whitespace-nowrap`}
+              title="Copy Markdown"
+            >
+              {copied ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
+              <span>{copied ? 'Copied' : 'Copy'}</span>
+            </button>
+
+            {onSaveToList && (
+              <button
+                type="button"
+                onClick={onSaveToList}
+                className={`flex items-center gap-1 px-1.5 py-0.5 rounded font-medium ${themeConfig.textSecondary} hover:${themeConfig.textPrimary} hover:bg-slate-500/10 transition-colors cursor-pointer whitespace-nowrap`}
+                title="Save this video & summary to your list"
+              >
+                <Plus className="w-3 h-3 opacity-75" />
+                <span>Save</span>
+              </button>
+            )}
+
+            {onOpenTypography && (
+              <button
+                type="button"
+                onClick={onOpenTypography}
+                className={`flex items-center gap-1 px-1.5 py-0.5 rounded font-medium ${themeConfig.textSecondary} hover:${themeConfig.textPrimary} hover:bg-slate-500/10 transition-colors cursor-pointer whitespace-nowrap`}
+                title="Font & Text Size"
+              >
+                <Type className="w-3 h-3 opacity-75" />
+                <span className="hidden md:inline">Font</span>
+              </button>
+            )}
+
+            {/* Style Selector Dropdown */}
+            <div className="relative" ref={styleRef}>
+              <button
+                type="button"
+                onClick={() => setIsStyleOpen(!isStyleOpen)}
+                className={`flex items-center gap-1 px-1.5 py-0.5 rounded font-medium ${themeConfig.textSecondary} hover:${themeConfig.textPrimary} hover:bg-slate-500/10 transition-colors cursor-pointer whitespace-nowrap`}
+                title="Change Summary Style"
+              >
+                <span>{currentPresetObj.shortLabel}</span>
+                <ChevronDown className="w-2.5 h-2.5 opacity-60" />
+              </button>
+
+              {isStyleOpen && (
+                <div
+                  className={`absolute right-0 mt-1 w-52 rounded-lg ${themeConfig.cardBg} shadow-xl p-1 z-50 space-y-0.5`}
+                >
+                  {SUMMARY_PRESETS.map((p) => {
+                    const isSelected = p.id === activePreset;
+                    return (
+                      <button
+                        key={p.id}
+                        type="button"
+                        onClick={() => {
+                          setActivePreset(p.id);
+                          onRegenerate(p.id);
+                          setIsStyleOpen(false);
+                        }}
+                        className={`w-full flex items-center justify-between px-2.5 py-1 rounded text-xs font-medium transition-colors cursor-pointer text-left ${
+                          isSelected
+                            ? `${themeConfig.accentBg} ${themeConfig.accent} font-semibold`
+                            : `${themeConfig.textSecondary} hover:bg-slate-500/10`
+                        }`}
+                      >
+                        <span>{p.shortLabel}</span>
+                        {isSelected && <Check className="w-3 h-3" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* More options (Download, Deep Dive, Lists, Explore) */}
+            <div className="relative" ref={actionsRef}>
+              <button
+                type="button"
+                onClick={() => setIsActionsOpen(!isActionsOpen)}
+                className={`p-1 rounded ${themeConfig.textSecondary} hover:${themeConfig.textPrimary} hover:bg-slate-500/10 transition-colors cursor-pointer`}
+                title="More Actions"
+              >
+                <MoreHorizontal className="w-3.5 h-3.5 opacity-75" />
+              </button>
+
+              {isActionsOpen && (
+                <div
+                  className={`absolute right-0 mt-1 w-52 rounded-lg ${themeConfig.cardBg} shadow-xl p-1 z-50 text-xs space-y-0.5`}
+                >
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleDownload();
+                      setIsActionsOpen(false);
+                    }}
+                    className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded ${themeConfig.textSecondary} hover:bg-slate-500/10 transition-colors cursor-pointer text-left`}
+                  >
+                    <Download className="w-3.5 h-3.5 opacity-75" />
+                    <span>Download Notes (.md)</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsActionsOpen(false);
+                      setIsExpandModalOpen(true);
+                    }}
+                    className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded ${themeConfig.textSecondary} hover:bg-slate-500/10 transition-colors cursor-pointer text-left`}
+                  >
+                    <Maximize2 className="w-3.5 h-3.5 opacity-75" />
+                    <span>Explain a Part in More Detail</span>
+                  </button>
+
+                  {onOpenLists && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsActionsOpen(false);
+                        onOpenLists();
+                      }}
+                      className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded ${themeConfig.textSecondary} hover:bg-slate-500/10 transition-colors cursor-pointer text-left`}
+                    >
+                      <BookOpen className="w-3.5 h-3.5 opacity-75" />
+                      <span>Open My Saved Lists</span>
+                    </button>
+                  )}
+
+                  {onOpenResearch && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsActionsOpen(false);
+                        onOpenResearch();
+                      }}
+                      className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded ${themeConfig.textSecondary} hover:bg-slate-500/10 transition-colors cursor-pointer text-left`}
+                    >
+                      <Globe className="w-3.5 h-3.5 opacity-75" />
+                      <span>Explore Videos &amp; Books</span>
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsActionsOpen(false);
+                      onRegenerate(activePreset);
+                    }}
+                    className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded ${themeConfig.textSecondary} hover:bg-slate-500/10 transition-colors cursor-pointer text-left`}
+                  >
+                    <RefreshCw className="w-3.5 h-3.5 opacity-75" />
+                    <span>Rewrite Summary</span>
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {onToggleOptions && (
+              <button
+                type="button"
+                onClick={onToggleOptions}
+                className={`p-1 rounded ${themeConfig.textMuted} hover:${themeConfig.textPrimary} hover:bg-slate-500/10 transition-colors cursor-pointer`}
+                title="Hide Toolbar"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+        </div>
+      ) : (
+        <div className="flex items-center justify-between gap-2 pb-1">
+          <h1 className={`text-sm sm:text-base font-bold tracking-tight truncate ${themeConfig.textPrimary}`}>
+            {videoTitle || 'Video Summary'}
+          </h1>
+          {onToggleOptions && (
+            <button
+              type="button"
+              onClick={onToggleOptions}
+              className={`flex items-center gap-1 px-2 py-0.5 rounded text-[11px] ${themeConfig.textMuted} hover:${themeConfig.textPrimary} hover:bg-slate-500/10 transition-colors cursor-pointer`}
+              title="Show Toolbar"
+            >
+              <SlidersHorizontal className="w-3 h-3" />
+              <span>Toolbar</span>
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Truncation Inline Notice */}
+      {summary.isTruncated && onContinueSummary && (
+        <div className={`flex items-center justify-between py-1 border-b ${themeConfig.borderLight} text-[11px] text-amber-400`}>
+          <span>Summary paused before the end of the video.</span>
+          <button
+            onClick={onContinueSummary}
+            disabled={isContinuing}
+            className="font-semibold underline cursor-pointer hover:text-amber-300"
+          >
+            {isContinuing ? 'Writing more...' : 'Keep writing →'}
+          </button>
+        </div>
+      )}
+
+      {/* Full-Width Unboxed Markdown Reading Canvas with Direct In-Place Word Highlighting */}
+      <div
+        style={typography ? getTypographyStyles(typography) : undefined}
+        className={`leading-relaxed prose ${themeConfig.proseClass} ${getContentWidthClass(
+          typography?.contentWidth || 'full'
+        )} w-full space-y-1`}
+      >
+        {parsedBlocks
+          .map((block, bIdx) => ({ block, bIdx }))
+          .filter(({ block }) => {
+            if (!summarySearch.trim()) return true;
+            return block.raw.toLowerCase().includes(summarySearch.toLowerCase());
+          })
+          .map(({ block, bIdx }) => {
+          const isCurrentBlock =
+            (isSpeaking || isPaused) && block.speechIdx >= 0 && speakingIndex === block.speechIdx;
+
+          return (
+            <div
+              key={bIdx}
+              id={`summary-block-${bIdx}`}
+              ref={(el) => {
+                if (block.speechIdx >= 0) {
+                  blockRefs.current[block.speechIdx] = el;
+                }
+              }}
+              onClick={() => {
+                if ((isSpeaking || isPaused) && block.speechIdx >= 0) {
+                  handlePlayFromBlock(block.speechIdx);
+                }
+              }}
+              className={`group relative transition-colors duration-150 rounded-lg ${
+                isCurrentBlock
+                  ? `${themeConfig.accentBg} border-l-2 border-indigo-500 pl-3.5 pr-8 py-1.5 my-1`
+                  : block.speechIdx >= 0
+                  ? 'hover:bg-slate-500/[0.03] px-1 pr-8'
+                  : 'px-1'
+              }`}
+            >
+              {/* Subtle Read-From-Here trigger on hover */}
+              {block.speechIdx >= 0 && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handlePlayFromBlock(block.speechIdx);
+                  }}
+                  className={`absolute right-1.5 top-1.5 p-1 rounded-md text-xs transition-opacity cursor-pointer ${
+                    isCurrentBlock
+                      ? 'opacity-100 text-indigo-400 bg-indigo-500/10'
+                      : `opacity-0 group-hover:opacity-80 hover:opacity-100 ${themeConfig.textMuted} hover:${themeConfig.textPrimary}`
+                  }`}
+                  title="Read aloud from this line"
+                >
+                  <Volume2 className="w-3.5 h-3.5" />
+                </button>
+              )}
+
+              {isCurrentBlock ? (
+                renderActiveSynchronizedBlock(block)
+              ) : (
+                <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                  {block.raw}
+                </ReactMarkdown>
+              )}
+            </div>
+          );
+        })}
+
+        {/* Bottom Continuation Action */}
+        {onContinueSummary && (
+          <div className="pt-10 pb-4 flex justify-start">
+            <button
+              onClick={onContinueSummary}
+              disabled={isContinuing}
+              className={`flex items-center gap-2 px-4 py-2 rounded-md ${themeConfig.primaryButton} disabled:opacity-50 font-medium text-xs sm:text-sm cursor-pointer transition-colors`}
+            >
+              {isContinuing ? (
+                <>
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                  <span>Writing the next part...</span>
+                </>
+              ) : (
+                <>
+                  <ArrowRightCircle className="w-4 h-4" />
+                  <span>Keep writing from where this left off</span>
+                </>
+              )}
+            </button>
+          </div>
+        )}
+
+        {/* Topic Expansions */}
+        {expansionResults.length > 0 && (
+          <div className={`mt-12 pt-8 border-t ${themeConfig.borderLight} space-y-10`}>
+            {expansionResults.map((exp, idx) => (
+              <div key={idx} className="space-y-4">
+                <h3 className="text-lg font-bold text-indigo-400">
+                  Closer Look: {exp.topic}
+                </h3>
+                <div className={`prose ${themeConfig.proseClass} max-w-none`}>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    {exp.content}
+                  </ReactMarkdown>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Expand Topic Modal */}
+      {isExpandModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div
+            className={`w-full max-w-md ${themeConfig.cardBg} rounded-xl p-6 shadow-2xl space-y-4`}
+          >
+            <div className="flex items-center justify-between">
+              <h3 className={`text-sm font-bold ${themeConfig.textPrimary}`}>Explain a Part in More Detail</h3>
+              <button
+                onClick={() => setIsExpandModalOpen(false)}
+                className="p-1 opacity-60 hover:opacity-100 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <p className={`text-xs ${themeConfig.textMuted}`}>
+              Type any story, idea, or topic mentioned in the video, and we’ll write a deeper, plain-English explanation of it.
+            </p>
+
+            <input
+              type="text"
+              value={expandTopic}
+              onChange={(e) => setExpandTopic(e.target.value)}
+              placeholder="What would you like explained in more detail?"
+              className={`w-full px-3.5 py-2.5 text-sm rounded-lg bg-slate-500/10 ${themeConfig.textPrimary} focus:outline-none`}
+            />
+
+            {expandError && (
+              <div className="text-xs text-rose-500 p-2 rounded-lg bg-rose-500/10">
+                {expandError}
+              </div>
+            )}
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setIsExpandModalOpen(false)}
+                className={`px-3 py-1.5 text-xs rounded-md ${themeConfig.textMuted} hover:${themeConfig.textPrimary} cursor-pointer`}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={!expandTopic.trim() || isExpanding}
+                onClick={() => handleDeepDive(expandTopic)}
+                className={`px-4 py-1.5 text-xs font-semibold rounded-md ${themeConfig.primaryButton} disabled:opacity-50 cursor-pointer flex items-center gap-1.5`}
+              >
+                {isExpanding ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : null}
+                <span>{isExpanding ? 'Analyzing...' : 'Generate'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};

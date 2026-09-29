@@ -1,0 +1,125 @@
+{
+  "entities": {
+    "UserList": {
+      "title": "UserList",
+      "description": "A user-created custom collection or list for saving video summaries, books, articles, and notes.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "description": "The Firebase Auth UID of the list owner.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "name": {
+          "type": "string",
+          "description": "Human-friendly name of the list.",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "description": {
+          "type": "string",
+          "description": "Optional description of what this list is for.",
+          "minLength": 0,
+          "maxLength": 500
+        },
+        "category": {
+          "type": "string",
+          "description": "Category tag for organizing lists.",
+          "enum": ["general", "videos", "reading", "study", "favorites"],
+          "maxLength": 32
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the list was created."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the list was last updated."
+        }
+      },
+      "required": ["ownerId", "name", "description", "category", "createdAt", "updatedAt"]
+    },
+    "ListItem": {
+      "title": "ListItem",
+      "description": "An individual saved video summary, book, research paper, article, or note inside a UserList subcollection.",
+      "type": "object",
+      "properties": {
+        "listId": {
+          "type": "string",
+          "description": "ID of the parent UserList document.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerId": {
+          "type": "string",
+          "description": "The Firebase Auth UID of the item owner.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "itemType": {
+          "type": "string",
+          "description": "Type of saved item.",
+          "enum": ["video", "summary", "book", "article", "note"],
+          "maxLength": 32
+        },
+        "title": {
+          "type": "string",
+          "description": "Title of the saved video, book, article, or note.",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "url": {
+          "type": "string",
+          "description": "Source URL for the saved item.",
+          "minLength": 0,
+          "maxLength": 1000
+        },
+        "subtitle": {
+          "type": "string",
+          "description": "Author, channel, or source subtitle.",
+          "minLength": 0,
+          "maxLength": 300
+        },
+        "content": {
+          "type": "string",
+          "description": "Saved markdown summary, quote, or excerpt.",
+          "minLength": 0,
+          "maxLength": 50000
+        },
+        "notes": {
+          "type": "string",
+          "description": "Personal user notes on this saved item.",
+          "minLength": 0,
+          "maxLength": 5000
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the item was added."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the item was last updated."
+        }
+      },
+      "required": ["listId", "ownerId", "itemType", "title", "url", "subtitle", "content", "notes", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/lists/{listId}": {
+      "schema": "UserList",
+      "description": "Top-level collection storing custom user lists."
+    },
+    "/lists/{listId}/items/{itemId}": {
+      "schema": "ListItem",
+      "description": "Subcollection storing saved items belonging to a specific UserList."
+    }
+  }
+}

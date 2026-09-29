@@ -1,0 +1,129 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Global Safety Net (Default-Deny)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 2. Hardened Primitives
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+    function incoming() {
+      return request.resource.data;
+    }
+    function existing() {
+      return resource.data;
+    }
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    // 3. Validation Blueprints
+    function isValidUserList(data) {
+      return data.keys().hasAll(['ownerId', 'name', 'description', 'category', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'name', 'description', 'category', 'createdAt', 'updatedAt'])
+        && data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 && data.ownerId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.ownerId == request.auth.uid
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 100
+        && data.description is string && data.description.size() <= 500
+        && data.category is string && data.category.size() <= 32 && data.category in ['general', 'videos', 'reading', 'study', 'favorites']
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidListItem(data, parentListId) {
+      return data.keys().hasAll(['listId', 'ownerId', 'itemType', 'title', 'url', 'subtitle', 'content', 'notes', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['listId', 'ownerId', 'itemType', 'title', 'url', 'subtitle', 'content', 'notes', 'createdAt', 'updatedAt'])
+        && data.listId is string && data.listId.size() >= 1 && data.listId.size() <= 128 && data.listId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.listId == parentListId
+        && data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 && data.ownerId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.ownerId == request.auth.uid
+        && data.itemType is string && data.itemType.size() <= 32 && data.itemType in ['video', 'summary', 'book', 'article', 'note']
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 300
+        && data.url is string && data.url.size() <= 1000
+        && data.subtitle is string && data.subtitle.size() <= 300
+        && data.content is string && data.content.size() <= 50000
+        && data.notes is string && data.notes.size() <= 5000
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isParentListOwner(listId) {
+      return exists(/databases/$(database)/documents/lists/$(listId))
+        && get(/databases/$(database)/documents/lists/$(listId)).data.ownerId == request.auth.uid;
+    }
+
+    // 4. Collection: /lists/{listId}
+    match /lists/{listId} {
+      allow get: if isSignedIn() && isValidId(listId) && existing().ownerId == request.auth.uid;
+      allow list: if isSignedIn() && existing().ownerId == request.auth.uid;
+
+      allow create: if isVerifiedUser()
+        && isValidId(listId)
+        && isValidUserList(incoming())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isVerifiedUser()
+        && isValidId(listId)
+        && isValidUserList(incoming())
+        && existing().ownerId == request.auth.uid
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          incoming().diff(existing()).affectedKeys().hasOnly(['name', 'description', 'category', 'updatedAt'])
+        );
+
+      allow delete: if isVerifiedUser()
+        && isValidId(listId)
+        && existing().ownerId == request.auth.uid;
+
+      // 5. Subcollection: /lists/{listId}/items/{itemId}
+      match /items/{itemId} {
+        allow get: if isSignedIn()
+          && isValidId(listId)
+          && isValidId(itemId)
+          && existing().ownerId == request.auth.uid
+          && isParentListOwner(listId);
+
+        allow list: if isSignedIn()
+          && existing().ownerId == request.auth.uid
+          && existing().listId == listId;
+
+        allow create: if isVerifiedUser()
+          && isValidId(listId)
+          && isValidId(itemId)
+          && isValidListItem(incoming(), listId)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && isParentListOwner(listId);
+
+        allow update: if isVerifiedUser()
+          && isValidId(listId)
+          && isValidId(itemId)
+          && isValidListItem(incoming(), listId)
+          && existing().ownerId == request.auth.uid
+          && incoming().ownerId == existing().ownerId
+          && incoming().listId == existing().listId
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && (
+            incoming().diff(existing()).affectedKeys().hasOnly(['title', 'url', 'subtitle', 'content', 'notes', 'itemType', 'updatedAt'])
+          )
+          && isParentListOwner(listId);
+
+        allow delete: if isVerifiedUser()
+          && isValidId(listId)
+          && isValidId(itemId)
+          && existing().ownerId == request.auth.uid
+          && isParentListOwner(listId);
+      }
+    }
+  }
+}
