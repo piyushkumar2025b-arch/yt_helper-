@@ -175,7 +175,17 @@ export interface AcademicPaperResult {
   url: string;
   pdfUrl?: string;
   doi?: string;
-  source: 'OpenAlex' | 'Semantic Scholar' | 'arXiv' | 'Crossref' | 'PubMed' | 'Europe PMC' | 'DOAJ' | 'CORE';
+  source:
+    | 'OpenAlex'
+    | 'Semantic Scholar'
+    | 'arXiv'
+    | 'Crossref'
+    | 'PubMed'
+    | 'Europe PMC'
+    | 'DOAJ'
+    | 'CORE'
+    | 'DBLP'
+    | 'HAL Science';
 }
 
 export interface GitHubRepoResult {
@@ -190,7 +200,13 @@ export interface GitHubRepoResult {
   topics?: string[];
   updatedAt?: string;
   ownerAvatar?: string;
-  source: 'GitHub' | 'HuggingFace Model' | 'HuggingFace Dataset' | 'npm Registry';
+  source:
+    | 'GitHub'
+    | 'HuggingFace Model'
+    | 'HuggingFace Dataset'
+    | 'HuggingFace Space'
+    | 'npm Registry'
+    | 'PyPI Package';
 }
 
 export interface CommunityDiscussionResult {
@@ -205,7 +221,14 @@ export interface CommunityDiscussionResult {
   isAnswered?: boolean;
   publishedAt?: string;
   tags?: string[];
-  source: 'StackOverflow' | 'Reddit' | 'DEV.to' | 'Hacker News';
+  source:
+    | 'StackOverflow'
+    | 'StackExchange'
+    | 'Reddit'
+    | 'DEV.to'
+    | 'Hacker News'
+    | 'Lobste.rs'
+    | 'GitHub Discussions';
 }
 
 export interface PodcastDatasetResult {
@@ -218,7 +241,41 @@ export interface PodcastDatasetResult {
   thumbnailUrl?: string;
   publishedAt?: string;
   durationOrSize?: string;
-  category: 'Podcast Episode' | 'Zenodo Dataset' | 'Internet Archive';
+  category:
+    | 'Podcast Episode'
+    | 'Zenodo Dataset'
+    | 'Internet Archive'
+    | 'Library of Congress'
+    | 'Wikimedia Commons Audio';
+}
+
+export interface ExactVideoResource {
+  id: string;
+  title: string;
+  type:
+    | 'Primary Video Source'
+    | 'Book / Publication'
+    | 'Research Paper'
+    | 'Person / Pioneer'
+    | 'Organization / Lab'
+    | 'Tool / Framework'
+    | 'Dataset / Benchmark'
+    | 'Historical / Key Reference'
+    | 'Custom Resource';
+  description: string;
+  exactQuote?: string;
+  timestampSeconds?: number;
+  formattedTime?: string;
+  primaryUrl: string;
+  primaryLabel: string;
+  secondaryLinks?: Array<{
+    label: string;
+    url: string;
+    sourceName: string;
+  }>;
+  authorOrCreator?: string;
+  year?: string;
+  verified: boolean;
 }
 
 export interface DictionaryKnowledgeResult {

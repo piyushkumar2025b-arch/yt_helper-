@@ -22,6 +22,10 @@ import {
   GitFork,
   CheckCircle2,
   Bookmark,
+  Clock,
+  Sparkles,
+  Link2,
+  Trash2,
 } from 'lucide-react';
 import {
   WebSearchResult,
@@ -33,14 +37,24 @@ import {
   GitHubRepoResult,
   CommunityDiscussionResult,
   PodcastDatasetResult,
+  ExactVideoResource,
+  VideoMetadata,
+  TranscriptSegment,
   ThemeId,
 } from '../types';
 import { APP_THEMES } from '../constants';
 import { extractSmartTermsFromSummary } from '../services/termExtractionService';
+import { extractExactVideoResources } from '../services/exactResourceExtractor';
+import { SmartImage } from './SmartImage';
+
+const CUSTOM_EXACT_RESOURCES_KEY = 'opentranscript_custom_exact_resources_v1';
 
 interface ResearchVisualsPanelProps {
   summaryMarkdown: string;
   videoTitle: string;
+  videoMetadata?: VideoMetadata | null;
+  transcriptSegments?: TranscriptSegment[];
+  onSeekToTimestamp?: (seconds: number) => void;
   onAppendWebResult: (result: WebSearchResult) => void;
   onAppendImageResult: (image: ImageSearchResult) => void;
   onAppendNewsResult?: (news: NewsSearchResult) => void;
@@ -70,6 +84,9 @@ interface ResearchVisualsPanelProps {
 export const ResearchVisualsPanel: React.FC<ResearchVisualsPanelProps> = ({
   summaryMarkdown,
   videoTitle,
+  videoMetadata = null,
+  transcriptSegments = [],
+  onSeekToTimestamp,
   onAppendWebResult,
   onAppendImageResult,
   onAppendNewsResult,
@@ -87,8 +104,138 @@ export const ResearchVisualsPanel: React.FC<ResearchVisualsPanelProps> = ({
   const [searchQuery, setSearchQuery] = useState(initialQuery || '');
   const [activeQuery, setActiveQuery] = useState(initialQuery || '');
   const [activeTab, setActiveTab] = useState<
-    'all' | 'papers' | 'code' | 'discussions' | 'podcasts' | 'books' | 'videos' | 'web' | 'news' | 'images'
+    | 'all'
+    | 'exact'
+    | 'papers'
+    | 'code'
+    | 'discussions'
+    | 'podcasts'
+    | 'books'
+    | 'videos'
+    | 'web'
+    | 'news'
+    | 'images'
   >('all');
+
+  // Custom user-added exact resources persisted in localStorage
+  const [customResources, setCustomResources] = useState<ExactVideoResource[]>(() => {
+    try {
+      const raw = localStorage.getItem(CUSTOM_EXACT_RESOURCES_KEY);
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const [isAddSourceOpen, setIsAddSourceOpen] = useState(false);
+  const [newSourceTitle, setNewSourceTitle] = useState('');
+  const [newSourceUrl, setNewSourceUrl] = useState('');
+  const [newSourceType, setNewSourceType] = useState<ExactVideoResource['type']>('Custom Resource');
+  const [newSourceAuthor, setNewSourceAuthor] = useState('');
+  const [newSourceTimestamp, setNewSourceTimestamp] = useState('');
+  const [newSourceDescription, setNewSourceDescription] = useState('');
+  const [newSourceQuote, setNewSourceQuote] = useState('');
+
+  const extractedExactResources = React.useMemo(() => {
+    return extractExactVideoResources(videoMetadata, transcriptSegments, summaryMarkdown);
+  }, [videoMetadata, transcriptSegments, summaryMarkdown]);
+
+  const exactResources = React.useMemo(() => {
+    return [...customResources, ...extractedExactResources];
+  }, [customResources, extractedExactResources]);
+
+  const saveCustomResources = (next: ExactVideoResource[]) => {
+    setCustomResources(next);
+    try {
+      localStorage.setItem(CUSTOM_EXACT_RESOURCES_KEY, JSON.stringify(next));
+    } catch {}
+  };
+
+  const handleAddCustomResource = (e: React.FormEvent, alsoAppendToSummary: boolean = false) => {
+    e.preventDefault();
+    const cleanTitle = newSourceTitle.trim();
+    if (!cleanTitle) return;
+    const rawUrl = newSourceUrl.trim();
+    const finalUrl = rawUrl
+      ? /^https?:\/\//i.test(rawUrl)
+        ? rawUrl
+        : `https://${rawUrl}`
+      : `https://www.google.com/search?q=${encodeURIComponent(cleanTitle)}`;
+
+    let parsedSeconds: number | undefined;
+    let formattedTime: string | undefined;
+    if (newSourceTimestamp.trim()) {
+      const parts = newSourceTimestamp.trim().replace(/[\[\]]/g, '').split(':').map(Number);
+      if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
+        parsedSeconds = parts[0] * 60 + parts[1];
+        formattedTime = `${String(parts[0]).padStart(2, '0')}:${String(parts[1]).padStart(2, '0')}`;
+      }
+    }
+
+    const created: ExactVideoResource = {
+      id: `custom-res-${Date.now()}`,
+      title: cleanTitle,
+      type: newSourceType,
+      description:
+        newSourceDescription.trim() ||
+        `User-added exact resource for "${videoTitle}".`,
+      exactQuote: newSourceQuote.trim() || undefined,
+      timestampSeconds: parsedSeconds,
+      formattedTime,
+      primaryUrl: finalUrl,
+      primaryLabel: 'Open Exact Resource',
+      authorOrCreator: newSourceAuthor.trim() || undefined,
+      verified: true,
+      secondaryLinks: [
+        {
+          label: 'Google Scholar',
+          url: `https://scholar.google.com/scholar?q=${encodeURIComponent(cleanTitle)}`,
+          sourceName: 'Google Scholar',
+        },
+        {
+          label: 'Wikipedia',
+          url: `https://en.wikipedia.org/wiki/Special:Search?search=${encodeURIComponent(cleanTitle)}`,
+          sourceName: 'Wikipedia',
+        },
+      ],
+    };
+
+    saveCustomResources([created, ...customResources]);
+
+    if (alsoAppendToSummary && onAppendCustomMarkdown) {
+      const md = `\n\n### [${created.title}](${created.primaryUrl}) — *${created.type}${
+        created.authorOrCreator ? ` · ${created.authorOrCreator}` : ''
+      }${created.formattedTime ? ` · [${created.formattedTime}]` : ''}*\n${created.description}${
+        created.exactQuote ? `\n> "${created.exactQuote}"` : ''
+      }\n`;
+      onAppendCustomMarkdown(md, `Added "${created.title}" to Summary`);
+      setAppendedIds((prev) => new Set(prev).add(created.id));
+    }
+
+    setNewSourceTitle('');
+    setNewSourceUrl('');
+    setNewSourceAuthor('');
+    setNewSourceTimestamp('');
+    setNewSourceDescription('');
+    setNewSourceQuote('');
+    setIsAddSourceOpen(false);
+  };
+
+  const handleDeleteCustomResource = (id: string) => {
+    saveCustomResources(customResources.filter((r) => r.id !== id));
+  };
+
+  const handleAppendExactResource = (res: ExactVideoResource) => {
+    if (onAppendCustomMarkdown) {
+      const md = `\n\n### [${res.title}](${res.primaryUrl}) — *${res.type}${
+        res.authorOrCreator ? ` · ${res.authorOrCreator}` : ''
+      }${res.formattedTime ? ` · [${res.formattedTime}]` : ''}*\n${res.description}${
+        res.exactQuote ? `\n> "${res.exactQuote}"` : ''
+      }\n`;
+      onAppendCustomMarkdown(md, `Added exact resource "${res.title}" to Summary`);
+    }
+    setAppendedIds((prev) => new Set(prev).add(res.id));
+  };
 
   const [academicResults, setAcademicResults] = useState<AcademicPaperResult[]>([]);
   const [codeResults, setCodeResults] = useState<GitHubRepoResult[]>([]);
@@ -109,6 +256,7 @@ export const ResearchVisualsPanel: React.FC<ResearchVisualsPanelProps> = ({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const [appendedIds, setAppendedIds] = useState<Set<string>>(new Set());
+  const [brokenImageIds, setBrokenImageIds] = useState<Set<string>>(new Set());
   const [previewImage, setPreviewImage] = useState<ImageSearchResult | null>(null);
 
   const loadMoreSentinelRef = useRef<HTMLDivElement | null>(null);
@@ -140,6 +288,7 @@ export const ResearchVisualsPanel: React.FC<ResearchVisualsPanelProps> = ({
     setPage(0);
     setYtNextPageToken(null);
     setHasMore(true);
+    setBrokenImageIds(new Set());
 
     try {
       const safeFetchJson = async (url: string) => {
@@ -448,6 +597,7 @@ export const ResearchVisualsPanel: React.FC<ResearchVisualsPanelProps> = ({
   };
 
   const totalCount =
+    exactResources.length +
     academicResults.length +
     codeResults.length +
     discussionResults.length +
@@ -458,6 +608,74 @@ export const ResearchVisualsPanel: React.FC<ResearchVisualsPanelProps> = ({
     bookResults.length +
     ytResults.length;
 
+  const currentLookupTerm = (activeQuery || searchQuery || videoTitle || 'Research').trim();
+  const directExternalSources = [
+    {
+      name: 'Google Scholar',
+      url: `https://scholar.google.com/scholar?q=${encodeURIComponent(currentLookupTerm)}`,
+    },
+    {
+      name: 'Semantic Scholar',
+      url: `https://www.semanticscholar.org/search?q=${encodeURIComponent(currentLookupTerm)}`,
+    },
+    {
+      name: 'arXiv.org',
+      url: `https://arxiv.org/search/?query=${encodeURIComponent(currentLookupTerm)}&searchtype=all`,
+    },
+    {
+      name: 'Connected Papers',
+      url: `https://www.connectedpapers.com/search?q=${encodeURIComponent(currentLookupTerm)}`,
+    },
+    {
+      name: 'Consensus AI',
+      url: `https://consensus.app/results/?q=${encodeURIComponent(currentLookupTerm)}`,
+    },
+    {
+      name: 'OpenLibrary',
+      url: `https://openlibrary.org/search?q=${encodeURIComponent(currentLookupTerm)}`,
+    },
+    {
+      name: 'Project Gutenberg',
+      url: `https://www.gutenberg.org/ebooks/search/?query=${encodeURIComponent(currentLookupTerm)}`,
+    },
+    {
+      name: 'Internet Archive',
+      url: `https://archive.org/search?query=${encodeURIComponent(currentLookupTerm)}`,
+    },
+    {
+      name: 'WorldCat Books',
+      url: `https://search.worldcat.org/search?q=${encodeURIComponent(currentLookupTerm)}`,
+    },
+    {
+      name: 'GitHub Code',
+      url: `https://github.com/search?q=${encodeURIComponent(currentLookupTerm)}&type=repositories`,
+    },
+    {
+      name: 'HuggingFace Hub',
+      url: `https://huggingface.co/search/full-text?q=${encodeURIComponent(currentLookupTerm)}`,
+    },
+    {
+      name: 'Papers With Code',
+      url: `https://paperswithcode.com/search?q=${encodeURIComponent(currentLookupTerm)}`,
+    },
+    {
+      name: 'PyPI Python',
+      url: `https://pypi.org/search/?q=${encodeURIComponent(currentLookupTerm)}`,
+    },
+    {
+      name: 'Wikipedia',
+      url: `https://en.wikipedia.org/wiki/Special:Search?search=${encodeURIComponent(currentLookupTerm)}`,
+    },
+    {
+      name: 'Wikidata Graph',
+      url: `https://www.wikidata.org/w/index.php?search=${encodeURIComponent(currentLookupTerm)}`,
+    },
+    {
+      name: 'Library of Congress',
+      url: `https://www.loc.gov/search/?q=${encodeURIComponent(currentLookupTerm)}`,
+    },
+  ];
+
   return (
     <div className="w-full space-y-6">
       {/* Unboxed Header and Search Controls */}
@@ -465,28 +683,147 @@ export const ResearchVisualsPanel: React.FC<ResearchVisualsPanelProps> = ({
         <div className="flex flex-wrap items-center justify-between gap-2.5">
           <div className="space-y-0.5">
             <h2 className={`text-sm sm:text-base font-bold tracking-tight ${themeConfig.textPrimary}`}>
-              Explore Videos, Books, Articles, Podcasts &amp; Discussions
+              Exact Video Resources &amp; 55+ Live Research Sources
             </h2>
             <p className={`text-[11px] ${themeConfig.textMuted}`}>
-              Discover related YouTube videos, books, articles, community discussions, podcasts, research papers, and open-source projects on this topic.
+              Explore exact books, papers, datasets, and timestamped mentions from this video—plus live academic, code, book, podcast, and community sources.
             </p>
           </div>
 
-          {(academicResults.length > 0 ||
-            webResults.length > 0 ||
-            imageResults.length > 0 ||
-            newsResults.length > 0 ||
-            bookResults.length > 0) && (
+          <div className="flex items-center gap-1.5 flex-wrap">
             <button
               type="button"
-              onClick={handleAppendAll}
-              className={`inline-flex items-center gap-1 px-2.5 py-1 rounded ${themeConfig.primaryButton} text-[11px] font-semibold cursor-pointer transition-colors whitespace-nowrap`}
+              onClick={() => setIsAddSourceOpen((prev) => !prev)}
+              className={`inline-flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-semibold cursor-pointer transition-colors whitespace-nowrap ${
+                isAddSourceOpen
+                  ? `${themeConfig.accentBg} ${themeConfig.accent}`
+                  : 'bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25'
+              }`}
             >
-              <Layers className="w-3 h-3" />
-              <span>+ Add All to Summary ({totalCount - ytResults.length})</span>
+              <Plus className="w-3 h-3" />
+              <span>{isAddSourceOpen ? 'Close Form' : '+ Add Exact Resource / Source'}</span>
             </button>
-          )}
+
+            {(academicResults.length > 0 ||
+              webResults.length > 0 ||
+              imageResults.length > 0 ||
+              newsResults.length > 0 ||
+              bookResults.length > 0) && (
+              <button
+                type="button"
+                onClick={handleAppendAll}
+                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded ${themeConfig.primaryButton} text-[11px] font-semibold cursor-pointer transition-colors whitespace-nowrap`}
+              >
+                <Layers className="w-3 h-3" />
+                <span>+ Add All to Summary ({totalCount - ytResults.length})</span>
+              </button>
+            )}
+          </div>
         </div>
+
+        {/* Add Custom Exact Resource / Source Form */}
+        {isAddSourceOpen && (
+          <form
+            onSubmit={(e) => handleAddCustomResource(e, false)}
+            className={`p-3 rounded-lg border ${themeConfig.borderLight} bg-slate-500/5 space-y-2.5`}
+          >
+            <div className="flex items-center justify-between">
+              <span className={`text-xs font-semibold ${themeConfig.textPrimary} flex items-center gap-1.5`}>
+                <Link2 className="w-3.5 h-3.5 text-emerald-400" />
+                Add Exact Resource or Custom Source
+              </span>
+              <button
+                type="button"
+                onClick={() => setIsAddSourceOpen(false)}
+                className={`text-[11px] ${themeConfig.textMuted} hover:${themeConfig.textPrimary} cursor-pointer`}
+              >
+                Cancel
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <input
+                type="text"
+                required
+                value={newSourceTitle}
+                onChange={(e) => setNewSourceTitle(e.target.value)}
+                placeholder="Resource Title (e.g. Neural Networks Book, Paper, Repo) *"
+                className={`px-2.5 py-1.5 text-xs rounded bg-slate-500/10 ${themeConfig.textPrimary} placeholder:opacity-45 focus:outline-none`}
+              />
+              <input
+                type="text"
+                value={newSourceUrl}
+                onChange={(e) => setNewSourceUrl(e.target.value)}
+                placeholder="Exact URL / Link (https://... or leave blank to auto-link)"
+                className={`px-2.5 py-1.5 text-xs rounded bg-slate-500/10 ${themeConfig.textPrimary} placeholder:opacity-45 focus:outline-none`}
+              />
+              <select
+                value={newSourceType}
+                onChange={(e) => setNewSourceType(e.target.value as ExactVideoResource['type'])}
+                className={`px-2.5 py-1.5 text-xs rounded bg-slate-500/10 ${themeConfig.textPrimary} focus:outline-none`}
+              >
+                <option value="Custom Resource">Custom Exact Resource</option>
+                <option value="Book / Publication">Book / Publication</option>
+                <option value="Research Paper">Research Paper</option>
+                <option value="Tool / Framework">Tool / Code / Framework</option>
+                <option value="Dataset / Benchmark">Dataset / Benchmark</option>
+                <option value="Person / Pioneer">Person / Pioneer</option>
+                <option value="Organization / Lab">Organization / Lab</option>
+                <option value="Historical / Key Reference">Historical / Key Reference</option>
+                <option value="Primary Video Source">Primary Video Citation</option>
+              </select>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <input
+                type="text"
+                value={newSourceAuthor}
+                onChange={(e) => setNewSourceAuthor(e.target.value)}
+                placeholder="Author / Creator (optional)"
+                className={`px-2.5 py-1.5 text-xs rounded bg-slate-500/10 ${themeConfig.textPrimary} placeholder:opacity-45 focus:outline-none`}
+              />
+              <input
+                type="text"
+                value={newSourceTimestamp}
+                onChange={(e) => setNewSourceTimestamp(e.target.value)}
+                placeholder="Video Timestamp (e.g. 04:15, optional)"
+                className={`px-2.5 py-1.5 text-xs rounded bg-slate-500/10 ${themeConfig.textPrimary} placeholder:opacity-45 focus:outline-none`}
+              />
+              <input
+                type="text"
+                value={newSourceQuote}
+                onChange={(e) => setNewSourceQuote(e.target.value)}
+                placeholder="Exact quote or context from video (optional)"
+                className={`px-2.5 py-1.5 text-xs rounded bg-slate-500/10 ${themeConfig.textPrimary} placeholder:opacity-45 focus:outline-none`}
+              />
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <input
+                type="text"
+                value={newSourceDescription}
+                onChange={(e) => setNewSourceDescription(e.target.value)}
+                placeholder="Why this resource matters or key details..."
+                className={`flex-1 min-w-[220px] px-2.5 py-1.5 text-xs rounded bg-slate-500/10 ${themeConfig.textPrimary} placeholder:opacity-45 focus:outline-none`}
+              />
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="submit"
+                  className="px-2.5 py-1 rounded text-[11px] font-semibold bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 cursor-pointer"
+                >
+                  + Add to Exact Resources
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => handleAddCustomResource(e as any, true)}
+                  className={`px-2.5 py-1 rounded text-[11px] font-semibold ${themeConfig.primaryButton} cursor-pointer`}
+                >
+                  + Add to Resources &amp; Summary
+                </button>
+              </div>
+            </div>
+          </form>
+        )}
 
         {/* Topic Suggestions */}
         {smartTerms.length > 0 && (
@@ -521,7 +858,7 @@ export const ResearchVisualsPanel: React.FC<ResearchVisualsPanelProps> = ({
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search videos, books, articles, podcasts, Reddit threads, or code..."
+                placeholder="Search across 55+ sources: papers, books, GitHub, HuggingFace, PyPI, Reddit, LOC..."
                 className={`w-full pl-8 pr-3 py-1.5 text-xs rounded bg-slate-500/10 ${themeConfig.textPrimary} placeholder:opacity-40 focus:outline-none`}
               />
             </div>
@@ -540,7 +877,27 @@ export const ResearchVisualsPanel: React.FC<ResearchVisualsPanelProps> = ({
             </button>
           </form>
 
+          {/* Direct External Engines Lookup Bar */}
           <div className="flex items-center gap-1 flex-wrap">
+            <span className={`text-[10px] font-semibold uppercase tracking-wider ${themeConfig.textMuted} mr-1`}>
+              Direct Sources:
+            </span>
+            {directExternalSources.map((src) => (
+              <a
+                key={src.name}
+                href={src.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] ${themeConfig.textSecondary} hover:${themeConfig.textPrimary} bg-slate-500/5 hover:bg-slate-500/15 transition-colors`}
+                title={`Search "${currentLookupTerm}" directly on ${src.name}`}
+              >
+                <span>{src.name}</span>
+                <ExternalLink className="w-2.5 h-2.5 opacity-60" />
+              </a>
+            ))}
+          </div>
+
+          <div className="flex items-center gap-1 flex-wrap pt-0.5">
             <button
               type="button"
               onClick={() => setActiveTab('all')}
@@ -554,110 +911,122 @@ export const ResearchVisualsPanel: React.FC<ResearchVisualsPanelProps> = ({
             </button>
             <button
               type="button"
+              onClick={() => setActiveTab('exact')}
+              className={`px-2 py-0.5 rounded text-[11px] font-medium cursor-pointer transition-colors inline-flex items-center gap-1 whitespace-nowrap ${
+                activeTab === 'exact'
+                  ? `${themeConfig.accentBg} ${themeConfig.accent} font-semibold`
+                  : `text-emerald-400 hover:bg-emerald-500/10`
+              }`}
+            >
+              <Sparkles className="w-3 h-3" />
+              <span>Exact Resources ({exactResources.length})</span>
+            </button>
+            <button
+              type="button"
               onClick={() => setActiveTab('papers')}
-              className={`px-3 py-1.5 rounded-md text-xs font-medium cursor-pointer transition-colors flex items-center gap-1.5 whitespace-nowrap ${
+              className={`px-2 py-0.5 rounded text-[11px] font-medium cursor-pointer transition-colors inline-flex items-center gap-1 whitespace-nowrap ${
                 activeTab === 'papers'
                   ? `${themeConfig.accentBg} ${themeConfig.accent} font-semibold`
                   : `${themeConfig.textMuted} hover:${themeConfig.textPrimary}`
               }`}
             >
-              <FileText className="w-3.5 h-3.5" />
+              <FileText className="w-3 h-3" />
               <span>Papers ({academicResults.length})</span>
             </button>
             <button
               type="button"
               onClick={() => setActiveTab('code')}
-              className={`px-3 py-1.5 rounded-md text-xs font-medium cursor-pointer transition-colors flex items-center gap-1.5 whitespace-nowrap ${
+              className={`px-2 py-0.5 rounded text-[11px] font-medium cursor-pointer transition-colors inline-flex items-center gap-1 whitespace-nowrap ${
                 activeTab === 'code'
                   ? `${themeConfig.accentBg} ${themeConfig.accent} font-semibold`
                   : `${themeConfig.textMuted} hover:${themeConfig.textPrimary}`
               }`}
             >
-              <Code2 className="w-3.5 h-3.5" />
+              <Code2 className="w-3 h-3" />
               <span>Code &amp; AI ({codeResults.length})</span>
             </button>
             <button
               type="button"
               onClick={() => setActiveTab('discussions')}
-              className={`px-3 py-1.5 rounded-md text-xs font-medium cursor-pointer transition-colors flex items-center gap-1.5 whitespace-nowrap ${
+              className={`px-2 py-0.5 rounded text-[11px] font-medium cursor-pointer transition-colors inline-flex items-center gap-1 whitespace-nowrap ${
                 activeTab === 'discussions'
                   ? `${themeConfig.accentBg} ${themeConfig.accent} font-semibold`
                   : `${themeConfig.textMuted} hover:${themeConfig.textPrimary}`
               }`}
             >
-              <MessageSquare className="w-3.5 h-3.5" />
-              <span>Q&amp;A &amp; Reddit ({discussionResults.length})</span>
+              <MessageSquare className="w-3 h-3" />
+              <span>Q&amp;A &amp; Forum ({discussionResults.length})</span>
             </button>
             <button
               type="button"
               onClick={() => setActiveTab('podcasts')}
-              className={`px-3 py-1.5 rounded-md text-xs font-medium cursor-pointer transition-colors flex items-center gap-1.5 whitespace-nowrap ${
+              className={`px-2 py-0.5 rounded text-[11px] font-medium cursor-pointer transition-colors inline-flex items-center gap-1 whitespace-nowrap ${
                 activeTab === 'podcasts'
                   ? `${themeConfig.accentBg} ${themeConfig.accent} font-semibold`
                   : `${themeConfig.textMuted} hover:${themeConfig.textPrimary}`
               }`}
             >
-              <Headphones className="w-3.5 h-3.5" />
-              <span>Podcasts &amp; Datasets ({podcastResults.length})</span>
+              <Headphones className="w-3 h-3" />
+              <span>Podcasts &amp; Archives ({podcastResults.length})</span>
             </button>
             <button
               type="button"
               onClick={() => setActiveTab('books')}
-              className={`px-3 py-1.5 rounded-md text-xs font-medium cursor-pointer transition-colors flex items-center gap-1.5 whitespace-nowrap ${
+              className={`px-2 py-0.5 rounded text-[11px] font-medium cursor-pointer transition-colors inline-flex items-center gap-1 whitespace-nowrap ${
                 activeTab === 'books'
                   ? `${themeConfig.accentBg} ${themeConfig.accent} font-semibold`
                   : `${themeConfig.textMuted} hover:${themeConfig.textPrimary}`
               }`}
             >
-              <BookOpen className="w-3.5 h-3.5" />
+              <BookOpen className="w-3 h-3" />
               <span>Books ({bookResults.length})</span>
             </button>
             <button
               type="button"
               onClick={() => setActiveTab('videos')}
-              className={`px-3 py-1.5 rounded-md text-xs font-medium cursor-pointer transition-colors flex items-center gap-1.5 whitespace-nowrap ${
+              className={`px-2 py-0.5 rounded text-[11px] font-medium cursor-pointer transition-colors inline-flex items-center gap-1 whitespace-nowrap ${
                 activeTab === 'videos'
                   ? `${themeConfig.accentBg} ${themeConfig.accent} font-semibold`
                   : `${themeConfig.textMuted} hover:${themeConfig.textPrimary}`
               }`}
             >
-              <Play className="w-3.5 h-3.5" />
+              <Play className="w-3 h-3" />
               <span>YouTube ({ytResults.length})</span>
             </button>
             <button
               type="button"
               onClick={() => setActiveTab('web')}
-              className={`px-3 py-1.5 rounded-md text-xs font-medium cursor-pointer transition-colors flex items-center gap-1.5 whitespace-nowrap ${
+              className={`px-2 py-0.5 rounded text-[11px] font-medium cursor-pointer transition-colors inline-flex items-center gap-1 whitespace-nowrap ${
                 activeTab === 'web'
                   ? `${themeConfig.accentBg} ${themeConfig.accent} font-semibold`
                   : `${themeConfig.textMuted} hover:${themeConfig.textPrimary}`
               }`}
             >
-              <Globe className="w-3.5 h-3.5" />
+              <Globe className="w-3 h-3" />
               <span>Web ({webResults.length})</span>
             </button>
             <button
               type="button"
               onClick={() => setActiveTab('news')}
-              className={`px-3 py-1.5 rounded-md text-xs font-medium cursor-pointer transition-colors flex items-center gap-1.5 whitespace-nowrap ${
+              className={`px-2 py-0.5 rounded text-[11px] font-medium cursor-pointer transition-colors inline-flex items-center gap-1 whitespace-nowrap ${
                 activeTab === 'news'
                   ? `${themeConfig.accentBg} ${themeConfig.accent} font-semibold`
                   : `${themeConfig.textMuted} hover:${themeConfig.textPrimary}`
               }`}
             >
-              <Newspaper className="w-3.5 h-3.5" />
+              <Newspaper className="w-3 h-3" />
               <span>News ({newsResults.length})</span>
             </button>
             <button
               type="button"
               onClick={() => setActiveTab('images')}
-              className={`px-3 py-1.5 rounded-md text-xs font-medium cursor-pointer transition-colors flex items-center gap-1.5 whitespace-nowrap ${
+              className={`px-2 py-0.5 rounded text-[11px] font-medium cursor-pointer transition-colors inline-flex items-center gap-1 whitespace-nowrap ${
                 activeTab === 'images'
                   ? `${themeConfig.accentBg} ${themeConfig.accent} font-semibold`
                   : `${themeConfig.textMuted} hover:${themeConfig.textPrimary}`
               }`}
             >
-              <ImageIcon className="w-3.5 h-3.5" />
+              <ImageIcon className="w-3 h-3" />
               <span>Figures ({imageResults.length})</span>
             </button>
           </div>
@@ -669,7 +1038,7 @@ export const ResearchVisualsPanel: React.FC<ResearchVisualsPanelProps> = ({
         <div className="py-16 text-center space-y-3">
           <Loader2 className="w-6 h-6 animate-spin mx-auto text-indigo-400" />
           <p className={`text-xs ${themeConfig.textMuted}`}>
-            Querying 30+ live research, code, Q&amp;A, podcast, dataset, and academic APIs for &ldquo;{searchQuery}&rdquo;...
+            Querying 55+ live research, book, code, Q&amp;A, podcast, archive, and academic APIs for &ldquo;{searchQuery}&rdquo;...
           </p>
         </div>
       )}
@@ -681,13 +1050,183 @@ export const ResearchVisualsPanel: React.FC<ResearchVisualsPanelProps> = ({
 
       {/* Results View */}
       {!isLoading && (
-        <div className="space-y-14">
+        <div className="space-y-12">
+          {/* SECTION 00: EXACT VIDEO RESOURCES & PRIMARY MENTIONS */}
+          {(activeTab === 'all' || activeTab === 'exact') && exactResources.length > 0 && (
+            <section className="space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <h3 className={`text-sm font-semibold ${themeConfig.textPrimary}`}>
+                    00. Exact Video Resources &amp; Primary Citations (Directly Mentioned in This Video)
+                  </h3>
+                  <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/15 text-emerald-400">
+                    Verified Exact Links
+                  </span>
+                </div>
+                <span className={`text-xs ${themeConfig.textMuted} tabular-nums`}>
+                  {exactResources.length} exact resources
+                </span>
+              </div>
+
+              <div className={`divide-y ${themeConfig.borderLight}`}>
+                {exactResources.map((res) => {
+                  const isAppended = appendedIds.has(res.id);
+                  const isCustom = res.id.startsWith('custom-res-');
+                  return (
+                    <div
+                      key={res.id}
+                      className="py-3.5 first:pt-0 flex flex-col gap-2"
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <div className="space-y-1 flex-1 min-w-[240px]">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-indigo-500/15 text-indigo-400">
+                              {res.type}
+                            </span>
+                            {res.formattedTime && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (onSeekToTimestamp && res.timestampSeconds !== undefined) {
+                                    onSeekToTimestamp(res.timestampSeconds);
+                                  }
+                                }}
+                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 cursor-pointer"
+                                title="Jump to this exact moment in the video"
+                              >
+                                <Clock className="w-2.5 h-2.5" />
+                                <span>[{res.formattedTime}]</span>
+                              </button>
+                            )}
+                            {res.authorOrCreator && (
+                              <span className={`text-[11px] font-medium ${themeConfig.textSecondary}`}>
+                                {res.authorOrCreator}
+                                {res.year ? ` (${res.year})` : ''}
+                              </span>
+                            )}
+                          </div>
+
+                          <a
+                            href={res.primaryUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className={`text-sm font-semibold ${themeConfig.textPrimary} hover:${themeConfig.accent} inline-flex items-center gap-1.5 transition-colors`}
+                          >
+                            <span>{res.title}</span>
+                            <ExternalLink className="w-3 h-3 opacity-60 shrink-0" />
+                          </a>
+                        </div>
+
+                        {/* Action Buttons */}
+                        <div className="flex items-center gap-1 flex-wrap shrink-0">
+                          <a
+                            href={res.primaryUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold ${themeConfig.primaryButton}`}
+                          >
+                            <span>{res.primaryLabel}</span>
+                            <ExternalLink className="w-2.5 h-2.5" />
+                          </a>
+
+                          <button
+                            type="button"
+                            onClick={() => handleSelectChip(res.title)}
+                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-slate-500/10 ${themeConfig.textSecondary} hover:${themeConfig.textPrimary} cursor-pointer`}
+                            title="Search all 55+ live sources for this exact resource"
+                          >
+                            <Search className="w-2.5 h-2.5" />
+                            <span>Deep Search</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleAppendExactResource(res)}
+                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold cursor-pointer transition-colors ${
+                              isAppended
+                                ? 'bg-emerald-500/20 text-emerald-300'
+                                : `bg-slate-500/10 ${themeConfig.textSecondary} hover:${themeConfig.textPrimary}`
+                            }`}
+                          >
+                            {isAppended ? <Check className="w-2.5 h-2.5" /> : <Plus className="w-2.5 h-2.5" />}
+                            <span>{isAppended ? 'Added' : '+ Summary'}</span>
+                          </button>
+
+                          {onSaveToList && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                onSaveToList({
+                                  itemType: res.type === 'Book / Publication' ? 'book' : 'article',
+                                  title: res.title,
+                                  url: res.primaryUrl,
+                                  subtitle: `${res.type}${res.authorOrCreator ? ` · ${res.authorOrCreator}` : ''}`,
+                                  content: res.description,
+                                  notes: res.exactQuote,
+                                })
+                              }
+                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-slate-500/10 ${themeConfig.textSecondary} hover:${themeConfig.textPrimary} cursor-pointer`}
+                            >
+                              <Bookmark className="w-2.5 h-2.5" />
+                              <span>Save</span>
+                            </button>
+                          )}
+
+                          {isCustom && (
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteCustomResource(res.id)}
+                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] text-rose-400 hover:bg-rose-500/10 cursor-pointer"
+                              title="Remove custom resource"
+                            >
+                              <Trash2 className="w-2.5 h-2.5" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      <p className={`text-xs leading-relaxed ${themeConfig.textSecondary}`}>
+                        {res.description}
+                      </p>
+
+                      {res.exactQuote && (
+                        <blockquote
+                          className={`pl-2.5 border-l-2 border-emerald-500/40 text-[11px] italic ${themeConfig.textMuted}`}
+                        >
+                          &ldquo;{res.exactQuote}&rdquo;
+                        </blockquote>
+                      )}
+
+                      {res.secondaryLinks && res.secondaryLinks.length > 0 && (
+                        <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
+                          <span className={`text-[10px] ${themeConfig.textMuted}`}>Exact Cross-Links:</span>
+                          {res.secondaryLinks.map((lnk, i) => (
+                            <a
+                              key={i}
+                              href={lnk.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-500/10 ${themeConfig.textSecondary} hover:${themeConfig.textPrimary} transition-colors`}
+                            >
+                              <span>{lnk.label}</span>
+                              <ExternalLink className="w-2.5 h-2.5 opacity-60" />
+                            </a>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          )}
+
           {/* SECTION 1: PEER-REVIEWED ACADEMIC PAPERS */}
           {(activeTab === 'all' || activeTab === 'papers') && (
             <section className="space-y-5">
               <div className="flex items-center justify-between">
                 <h3 className={`text-sm font-semibold ${themeConfig.textPrimary}`}>
-                  01. Peer-Reviewed Papers &amp; Preprints (OpenAlex · Semantic Scholar · arXiv · Crossref · PubMed · Europe PMC · DOAJ)
+                  01. Peer-Reviewed Papers &amp; Preprints (OpenAlex · Semantic Scholar · arXiv · Crossref · PubMed · Europe PMC · DOAJ · DBLP · HAL)
                 </h3>
                 <span className={`text-xs ${themeConfig.textMuted} tabular-nums`}>
                   {academicResults.length} papers loaded
@@ -810,7 +1349,7 @@ export const ResearchVisualsPanel: React.FC<ResearchVisualsPanelProps> = ({
             <section className="space-y-5">
               <div className="flex items-center justify-between">
                 <h3 className={`text-sm font-semibold ${themeConfig.textPrimary}`}>
-                  02. Open-Source Repositories, HuggingFace Models &amp; Packages (GitHub · HuggingFace Hub · npm)
+                  02. Open-Source Code, AI Models, Spaces &amp; Packages (GitHub · HuggingFace Models, Datasets &amp; Spaces · PyPI · npm)
                 </h3>
                 <span className={`text-xs ${themeConfig.textMuted} tabular-nums`}>
                   {codeResults.length} repositories &amp; models loaded
@@ -908,7 +1447,7 @@ export const ResearchVisualsPanel: React.FC<ResearchVisualsPanelProps> = ({
             <section className="space-y-5">
               <div className="flex items-center justify-between">
                 <h3 className={`text-sm font-semibold ${themeConfig.textPrimary}`}>
-                  03. Technical Q&amp;A &amp; Community Threads (StackOverflow · Reddit · DEV.to · Hacker News)
+                  03. Technical Q&amp;A &amp; Community Threads (StackOverflow · CrossValidated SE · Reddit · DEV.to · Hacker News · GitHub Discussions)
                 </h3>
                 <span className={`text-xs ${themeConfig.textMuted} tabular-nums`}>
                   {discussionResults.length} discussions loaded
@@ -988,7 +1527,7 @@ export const ResearchVisualsPanel: React.FC<ResearchVisualsPanelProps> = ({
             <section className="space-y-5">
               <div className="flex items-center justify-between">
                 <h3 className={`text-sm font-semibold ${themeConfig.textPrimary}`}>
-                  04. Audio Podcasts, Open Science Datasets &amp; Archival Media (Apple Podcasts · CERN Zenodo · Internet Archive)
+                  04. Podcasts, Scientific Datasets &amp; Archival Records (Apple Podcasts · CERN Zenodo · Internet Archive · Library of Congress)
                 </h3>
                 <span className={`text-xs ${themeConfig.textMuted} tabular-nums`}>
                   {podcastResults.length} items loaded
@@ -1009,15 +1548,13 @@ export const ResearchVisualsPanel: React.FC<ResearchVisualsPanelProps> = ({
                         className="py-5 first:pt-0 last:pb-0 flex flex-col sm:flex-row sm:items-start justify-between gap-4"
                       >
                         <div className="flex items-start gap-4 max-w-4xl">
-                          {item.thumbnailUrl && (
-                            <img
-                              src={item.thumbnailUrl}
-                              alt={item.title}
-                              referrerPolicy="no-referrer"
-                              className="w-14 h-14 rounded-lg object-cover shrink-0 bg-black/20"
-                              loading="lazy"
-                            />
-                          )}
+                          <SmartImage
+                            src={item.thumbnailUrl}
+                            alt={item.title}
+                            variant="podcast"
+                            badgeText={item.category.split(' ')[0]}
+                            className="w-14 h-14 rounded-lg object-cover shrink-0 bg-black/20"
+                          />
                           <div className="space-y-1.5">
                             <div className={`flex items-center gap-2 text-xs ${themeConfig.textMuted} flex-wrap`}>
                               <span className="text-indigo-400 font-medium">{item.category}</span>
@@ -1085,7 +1622,7 @@ export const ResearchVisualsPanel: React.FC<ResearchVisualsPanelProps> = ({
             <section className="space-y-5">
               <div className="flex items-center justify-between">
                 <h3 className={`text-sm font-semibold ${themeConfig.textPrimary}`}>
-                  05. Published Books &amp; Literature (Google Books API · OpenLibrary)
+                  05. Books &amp; Full-Text Editions (Google Books · OpenLibrary · Project Gutenberg Full Text · Internet Archive Texts)
                 </h3>
                 <span className={`text-xs ${themeConfig.textMuted} tabular-nums`}>
                   {bookResults.length} volumes loaded
@@ -1106,15 +1643,12 @@ export const ResearchVisualsPanel: React.FC<ResearchVisualsPanelProps> = ({
                         className="py-5 first:pt-0 last:pb-0 flex flex-col sm:flex-row sm:items-start justify-between gap-5"
                       >
                         <div className="flex items-start gap-4 max-w-4xl">
-                          {book.thumbnailUrl && (
-                            <img
-                              src={book.thumbnailUrl}
-                              alt={book.title}
-                              referrerPolicy="no-referrer"
-                              className="w-14 sm:w-16 rounded object-cover shrink-0 bg-black/20"
-                              loading="lazy"
-                            />
-                          )}
+                          <SmartImage
+                            src={book.thumbnailUrl}
+                            alt={book.title}
+                            variant="book"
+                            className="w-14 sm:w-16 h-20 sm:h-22 rounded object-cover shrink-0 bg-black/20"
+                          />
                           <div className="space-y-1.5">
                             <div className={`flex items-center gap-2 text-xs ${themeConfig.textMuted} flex-wrap`}>
                               <span className="text-indigo-400 font-medium">
@@ -1224,12 +1758,16 @@ export const ResearchVisualsPanel: React.FC<ResearchVisualsPanelProps> = ({
                           onClick={() => onSelectVideoUrl && onSelectVideoUrl(vid.url)}
                           className="relative aspect-video rounded-lg overflow-hidden bg-black/30 cursor-pointer group"
                         >
-                          <img
+                          <SmartImage
                             src={vid.thumbnailUrl}
+                            fallbackSrc={
+                              vid.videoId
+                                ? `https://i.ytimg.com/vi/${vid.videoId}/mqdefault.jpg`
+                                : undefined
+                            }
                             alt={vid.title}
-                            referrerPolicy="no-referrer"
+                            variant="video"
                             className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
-                            loading="lazy"
                           />
                         </div>
                         <div className="space-y-1">
@@ -1466,31 +2004,36 @@ export const ResearchVisualsPanel: React.FC<ResearchVisualsPanelProps> = ({
                 </span>
               </div>
 
-              {imageResults.length === 0 ? (
+              {imageResults.filter((img) => !brokenImageIds.has(img.id)).length === 0 ? (
                 <p className={`text-xs ${themeConfig.textMuted}`}>
                   No figures found for this query.
                 </p>
               ) : (
                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
-                  {imageResults.map((img) => {
-                    const isAppended = appendedIds.has(img.id);
-                    return (
-                      <div key={img.id} className="group space-y-2">
-                        <div
-                          className="relative aspect-video rounded-lg bg-black/30 cursor-pointer overflow-hidden"
-                          onClick={() => setPreviewImage(img)}
-                        >
-                          <img
-                            src={img.thumbnailUrl}
-                            alt={img.title}
-                            referrerPolicy="no-referrer"
-                            loading="lazy"
-                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
-                          />
-                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                            <Maximize2 className="w-4 h-4 text-white" />
+                  {imageResults
+                    .filter((img) => !brokenImageIds.has(img.id))
+                    .map((img) => {
+                      const isAppended = appendedIds.has(img.id);
+                      return (
+                        <div key={img.id} className="group space-y-2">
+                          <div
+                            className="relative aspect-video rounded-lg bg-black/30 cursor-pointer overflow-hidden"
+                            onClick={() => setPreviewImage(img)}
+                          >
+                            <SmartImage
+                              src={img.thumbnailUrl}
+                              fallbackSrc={img.url}
+                              alt={img.title}
+                              variant="figure"
+                              onFatalError={() =>
+                                setBrokenImageIds((prev) => new Set(prev).add(img.id))
+                              }
+                              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
+                            />
+                            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                              <Maximize2 className="w-4 h-4 text-white" />
+                            </div>
                           </div>
-                        </div>
 
                         <div className="flex items-center justify-between gap-2">
                           <p className={`text-xs font-medium truncate ${themeConfig.textPrimary}`} title={img.title}>
@@ -1561,10 +2104,11 @@ export const ResearchVisualsPanel: React.FC<ResearchVisualsPanelProps> = ({
             </div>
 
             <div className="max-h-[65vh] overflow-hidden flex items-center justify-center bg-black/40 px-4">
-              <img
+              <SmartImage
                 src={previewImage.url}
+                fallbackSrc={previewImage.thumbnailUrl}
                 alt={previewImage.title}
-                referrerPolicy="no-referrer"
+                variant="figure"
                 className="max-h-[62vh] max-w-full object-contain rounded-lg"
               />
             </div>

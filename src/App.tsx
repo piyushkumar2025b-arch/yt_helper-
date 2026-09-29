@@ -1019,6 +1019,9 @@ export default function App() {
               <ResearchVisualsPanel
                 summaryMarkdown={summary?.markdown || fullText}
                 videoTitle={metadata?.title || 'YouTube Video'}
+                videoMetadata={metadata}
+                transcriptSegments={segments}
+                onSeekToTimestamp={handleSeekToTimestamp}
                 onAppendWebResult={handleAppendWebResult}
                 onAppendImageResult={handleAppendImageResult}
                 onAppendNewsResult={handleAppendNewsResult}

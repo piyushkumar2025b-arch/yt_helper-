@@ -1375,7 +1375,7 @@ ${transcript.slice(0, 150000)}
                 title: doc.title,
                 authors: Array.isArray(doc.author_name) ? doc.author_name.slice(0, 3) : ['Unknown Author'],
                 publishedDate: doc.first_publish_year ? String(doc.first_publish_year) : undefined,
-                publisher: Array.isArray(doc.publisher) ? doc.publisher[0] : undefined,
+                publisher: Array.isArray(doc.publisher) ? doc.publisher[0] : 'OpenLibrary',
                 description: Array.isArray(doc.subject)
                   ? `Subjects: ${doc.subject.slice(0, 6).join(', ')}`
                   : undefined,
@@ -1389,6 +1389,78 @@ ${transcript.slice(0, 150000)}
           // ignore openlibrary error
         }
       }
+
+      // 3. Project Gutenberg Full-Text Books via Gutendex API
+      try {
+        const gutUrl = `https://gutendex.com/books/?search=${encodeURIComponent(q)}`;
+        const gutRes = await fetch(gutUrl, {
+          signal: AbortSignal.timeout(4000),
+          headers: { 'User-Agent': 'OpenTranscriptAI/1.0' },
+        });
+        if (gutRes.ok) {
+          const gutData = (await gutRes.json()) as any;
+          for (const b of (gutData.results || []).slice(0, 6)) {
+            if (!b.title) continue;
+            const authors = Array.isArray(b.authors)
+              ? b.authors.map((a: any) => a.name).filter(Boolean)
+              : ['Project Gutenberg Author'];
+            const cover = b.formats?.['image/jpeg'] || undefined;
+            const readLink =
+              b.formats?.['text/html'] ||
+              b.formats?.['application/epub+zip'] ||
+              `https://www.gutenberg.org/ebooks/${b.id}`;
+            books.push({
+              id: `gutenberg-${b.id}`,
+              title: b.title,
+              authors: authors.length > 0 ? authors : ['Classic Author'],
+              publisher: 'Project Gutenberg (Full Text)',
+              description:
+                Array.isArray(b.summaries) && b.summaries[0]
+                  ? String(b.summaries[0]).slice(0, 260)
+                  : `Free full-text edition on Project Gutenberg (${(b.download_count || 0).toLocaleString()} downloads).`,
+              categories: Array.isArray(b.subjects) ? b.subjects.slice(0, 3) : ['Full-Text Classic'],
+              thumbnailUrl: cover,
+              infoLink: readLink,
+            });
+          }
+        }
+      } catch {}
+
+      // 4. Internet Archive Digital Library Books & Texts (sorted by downloads desc to ensure high-quality editions)
+      try {
+        const iaPage = page + 1;
+        const iaQuery = `title:(${q}) AND mediatype:(texts)`;
+        const iaUrl = `https://archive.org/advancedsearch.php?q=${encodeURIComponent(
+          iaQuery
+        )}&sort[]=downloads+desc&fl[]=identifier,title,creator,description,year,publisher&rows=6&page=${iaPage}&output=json`;
+        const iaRes = await fetch(iaUrl, {
+          signal: AbortSignal.timeout(4500),
+          headers: { 'User-Agent': 'OpenTranscriptAI/1.0' },
+        });
+        if (iaRes.ok) {
+          const iaData = (await iaRes.json()) as any;
+          for (const doc of iaData.response?.docs || []) {
+            if (!doc.identifier || !doc.title) continue;
+            const rawDesc = Array.isArray(doc.description) ? doc.description[0] : doc.description;
+            books.push({
+              id: `ia-book-${doc.identifier}`,
+              title: String(doc.title),
+              authors: doc.creator
+                ? Array.isArray(doc.creator)
+                  ? doc.creator.slice(0, 3)
+                  : [String(doc.creator)]
+                : ['Internet Archive Texts'],
+              publishedDate: doc.year ? String(doc.year) : undefined,
+              publisher: 'Internet Archive Digital Library',
+              description: rawDesc
+                ? String(rawDesc).replace(/<[^>]+>/g, '').slice(0, 240)
+                : 'Digitized archival book available for reading and download on Internet Archive.',
+              thumbnailUrl: `https://archive.org/services/img/${doc.identifier}`,
+              infoLink: `https://archive.org/details/${doc.identifier}`,
+            });
+          }
+        }
+      } catch {}
 
       res.json({
         ok: true,
@@ -1791,11 +1863,50 @@ ${transcript.slice(0, 150000)}
         } catch {}
       }
 
-      // 1. Wikimedia Commons API (24 images per page with gsroffset)
+      // 1. Wikipedia PageImages API (12 high-relevance encyclopedia images per page)
       try {
-        const gsrlimit = 24;
+        const wikiLimit = 12;
+        const wikiOffset = page * wikiLimit;
+        const wikiImgUrl = `https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(q)}&gsrlimit=${wikiLimit}&gsroffset=${wikiOffset}&prop=pageimages|extracts&pithumbsize=640&exintro=1&explaintext=1&exsentences=1&format=json`;
+        const wikiRes = await fetch(wikiImgUrl, {
+          signal: AbortSignal.timeout(4500),
+          headers: { 'User-Agent': 'OpenTranscriptAI/1.0 (https://aistudio.google.com)' }
+        });
+        if (wikiRes.ok) {
+          const wikiData = await wikiRes.json() as any;
+          const pages = wikiData.query?.pages || {};
+          for (const pId of Object.keys(pages)) {
+            const pageObj = pages[pId];
+            if (pageObj.thumbnail?.source) {
+              const thumbSrc = String(pageObj.thumbnail.source).replace(/^http:\/\//i, 'https://');
+              const isDup = images.some((img) => img.title.toLowerCase() === pageObj.title.toLowerCase());
+              if (!isDup) {
+                images.push({
+                  id: `wiki-page-${pId}`,
+                  title: pageObj.title,
+                  url: thumbSrc,
+                  thumbnailUrl: thumbSrc,
+                  sourceUrl: `https://en.wikipedia.org/wiki/${encodeURIComponent(pageObj.title.replace(/\s+/g, '_'))}`,
+                  sourceName: 'Wikipedia Encyclopedia',
+                  width: pageObj.thumbnail.width,
+                  height: pageObj.thumbnail.height,
+                  description: pageObj.extract || pageObj.title,
+                });
+              }
+            }
+          }
+        }
+      } catch (err) {
+        // wiki error
+      }
+
+      // 2. Wikimedia Commons API (20 verified web-compatible images per page)
+      try {
+        const gsrlimit = 20;
         const gsroffset = page * gsrlimit;
-        const wmUrl = `https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(q)}&gsrnamespace=6&gsrlimit=${gsrlimit}&gsroffset=${gsroffset}&prop=imageinfo&iiprop=url|size|extmetadata&iiurlwidth=600&format=json`;
+        const wmUrl = `https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(
+          `${q} filetype:bitmap`
+        )}&gsrnamespace=6&gsrlimit=${gsrlimit}&gsroffset=${gsroffset}&prop=imageinfo&iiprop=url|size|extmetadata&iiurlwidth=600&format=json`;
         const wmRes = await fetch(wmUrl, {
           signal: AbortSignal.timeout(5000),
           headers: { 'User-Agent': 'OpenTranscriptAI/1.0 (https://aistudio.google.com)' }
@@ -1810,7 +1921,25 @@ ${transcript.slice(0, 150000)}
 
             const filename = (pageObj.title || '').replace(/^File:/, '');
             const ext = filename.split('.').pop()?.toLowerCase();
-            if (['ogg', 'ogv', 'oga', 'pdf', 'mid', 'midi', 'wav', 'mp3', 'webm'].includes(ext || '')) {
+            if (
+              [
+                'ogg',
+                'ogv',
+                'oga',
+                'pdf',
+                'djvu',
+                'tif',
+                'tiff',
+                'xcf',
+                'stl',
+                'mid',
+                'midi',
+                'wav',
+                'mp3',
+                'webm',
+                'flac',
+              ].includes(ext || '')
+            ) {
               continue;
             }
 
@@ -1822,12 +1951,14 @@ ${transcript.slice(0, 150000)}
 
             const desc = info.extmetadata?.ObjectName?.value || info.extmetadata?.ImageDescription?.value || cleanTitle;
             const plainDesc = String(desc).replace(/<[^>]+>/g, '').slice(0, 160);
+            const secureThumb = String(info.thumburl).replace(/^http:\/\//i, 'https://');
+            const secureFull = String(info.url || info.thumburl).replace(/^http:\/\//i, 'https://');
 
             images.push({
               id: `wm-${pageId}`,
               title: cleanTitle,
-              url: info.url || info.thumburl,
-              thumbnailUrl: info.thumburl,
+              url: secureFull,
+              thumbnailUrl: secureThumb,
               sourceUrl: info.descriptionurl || `https://commons.wikimedia.org/wiki/${encodeURIComponent(pageObj.title)}`,
               sourceName: 'Wikimedia Commons',
               width: info.thumbwidth || info.width,
@@ -1838,42 +1969,6 @@ ${transcript.slice(0, 150000)}
         }
       } catch (err) {
         // wm error
-      }
-
-      // 2. Wikipedia PageImages API (12 images per page with gsroffset)
-      try {
-        const wikiLimit = 12;
-        const wikiOffset = page * wikiLimit;
-        const wikiImgUrl = `https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(q)}&gsrlimit=${wikiLimit}&gsroffset=${wikiOffset}&prop=pageimages|extracts&pithumbsize=600&exintro=1&explaintext=1&exsentences=1&format=json`;
-        const wikiRes = await fetch(wikiImgUrl, {
-          signal: AbortSignal.timeout(4500),
-          headers: { 'User-Agent': 'OpenTranscriptAI/1.0 (https://aistudio.google.com)' }
-        });
-        if (wikiRes.ok) {
-          const wikiData = await wikiRes.json() as any;
-          const pages = wikiData.query?.pages || {};
-          for (const pId of Object.keys(pages)) {
-            const pageObj = pages[pId];
-            if (pageObj.thumbnail?.source) {
-              const isDup = images.some((img) => img.title.toLowerCase() === pageObj.title.toLowerCase());
-              if (!isDup) {
-                images.push({
-                  id: `wiki-page-${pId}`,
-                  title: pageObj.title,
-                  url: pageObj.thumbnail.source,
-                  thumbnailUrl: pageObj.thumbnail.source,
-                  sourceUrl: `https://en.wikipedia.org/wiki/${encodeURIComponent(pageObj.title.replace(/\s+/g, '_'))}`,
-                  sourceName: 'Wikipedia Article',
-                  width: pageObj.thumbnail.width,
-                  height: pageObj.thumbnail.height,
-                  description: pageObj.extract || pageObj.title,
-                });
-              }
-            }
-          }
-        }
-      } catch (err) {
-        // wiki error
       }
 
       // 3. Openverse Creative Commons Image API (12 images per page)
@@ -1888,12 +1983,14 @@ ${transcript.slice(0, 150000)}
           const ovData = (await ovRes.json()) as any;
           for (const item of ovData.results || []) {
             if (!item.url) continue;
+            const fullUrl = String(item.url).replace(/^http:\/\//i, 'https://');
+            const thumbUrl = String(item.thumbnail || item.url).replace(/^http:\/\//i, 'https://');
             images.push({
               id: `ov-${item.id || Math.random().toString(36).slice(2, 8)}`,
               title: item.title || q,
-              url: item.url,
-              thumbnailUrl: item.thumbnail || item.url,
-              sourceUrl: item.foreign_landing_url || item.url,
+              url: fullUrl,
+              thumbnailUrl: thumbUrl,
+              sourceUrl: item.foreign_landing_url || fullUrl,
               sourceName: `Openverse (${item.source || 'CC'})`,
               width: item.width,
               height: item.height,
@@ -1907,6 +2004,46 @@ ${transcript.slice(0, 150000)}
     } catch (err: any) {
       console.error('Image search error:', err);
       res.status(500).json({ error: err.message || 'Image search failed' });
+    }
+  });
+
+  // 7b. GET /api/image-proxy - Server-side Image Proxy to bypass hotlink/CORS/mixed-content blocks and reject 1x1 blank pixels
+  app.get('/api/image-proxy', async (req: Request, res: Response) => {
+    try {
+      const rawUrl = ((req.query.url as string) || '').trim();
+      if (!rawUrl || !/^https?:\/\//i.test(rawUrl)) {
+        res.status(400).end();
+        return;
+      }
+      const upstream = await fetch(rawUrl, {
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+          Accept: 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+        },
+        signal: AbortSignal.timeout(5000),
+      });
+      if (!upstream.ok) {
+        res.status(404).end();
+        return;
+      }
+      const contentType = upstream.headers.get('content-type') || '';
+      if (!contentType.startsWith('image/')) {
+        res.status(404).end();
+        return;
+      }
+      const arrayBuf = await upstream.arrayBuffer();
+      const buf = Buffer.from(arrayBuf);
+      // Reject 1x1 blank placeholder images (< 160 bytes)
+      if (buf.length < 160) {
+        res.status(404).end();
+        return;
+      }
+      res.setHeader('Content-Type', contentType);
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+      res.send(buf);
+    } catch {
+      res.status(404).end();
     }
   });
 
@@ -2163,7 +2300,17 @@ ${transcript.slice(0, 150000)}
         url: string;
         pdfUrl?: string;
         doi?: string;
-        source: 'OpenAlex' | 'Semantic Scholar' | 'arXiv' | 'Crossref' | 'PubMed' | 'Europe PMC' | 'DOAJ' | 'CORE';
+        source:
+          | 'OpenAlex'
+          | 'Semantic Scholar'
+          | 'arXiv'
+          | 'Crossref'
+          | 'PubMed'
+          | 'Europe PMC'
+          | 'DOAJ'
+          | 'CORE'
+          | 'DBLP'
+          | 'HAL Science';
       }> = [];
 
       // Helper to reconstruct OpenAlex inverted index abstract
@@ -2467,6 +2614,71 @@ ${transcript.slice(0, 150000)}
                 pdfUrl: w.downloadUrl || undefined,
                 doi: w.doi,
                 source: 'CORE',
+              });
+            }
+          }
+        })(),
+
+        // 9. DBLP Computer Science Bibliography API (6 CS/AI papers per page)
+        (async () => {
+          const dblpFirst = page * 6;
+          const dblpUrl = `https://dblp.org/search/publ/api?q=${encodeURIComponent(q)}&h=6&f=${dblpFirst}&format=json`;
+          const dbRes = await fetch(dblpUrl, {
+            signal: AbortSignal.timeout(4500),
+            headers: { 'User-Agent': 'OpenTranscriptAI/1.0' },
+          });
+          if (dbRes.ok) {
+            const dbData = (await dbRes.json()) as any;
+            const hits = dbData.result?.hits?.hit || [];
+            for (const h of hits) {
+              const info = h.info || {};
+              if (!info.title) continue;
+              const rawAuth = info.authors?.author;
+              const authList = Array.isArray(rawAuth) ? rawAuth : rawAuth ? [rawAuth] : [];
+              const authors = authList
+                .map((a: any) => (typeof a === 'string' ? a : a.text))
+                .filter(Boolean)
+                .slice(0, 4);
+              papers.push({
+                id: `dblp-${h['@id'] || Math.random().toString(36).slice(2, 8)}`,
+                title: String(info.title).replace(/\.$/, ''),
+                authors: authors.length > 0 ? authors : ['DBLP CS Researcher'],
+                year: info.year,
+                venue: info.venue || 'DBLP Computer Science',
+                url: info.ee || info.url || `https://dblp.org/search?q=${encodeURIComponent(info.title)}`,
+                doi: info.doi,
+                source: 'DBLP',
+              });
+            }
+          }
+        })(),
+
+        // 10. HAL Open Science Archive API (6 open-access scientific papers per page)
+        (async () => {
+          const halStart = page * 6;
+          const halUrl = `https://api.archives-ouvertes.fr/search/?q=${encodeURIComponent(
+            q
+          )}&wt=json&rows=6&start=${halStart}&fl=docid,title_s,authFullName_s,producedDateY_i,journalTitle_s,abstract_s,uri_s,fileMain_s`;
+          const halRes = await fetch(halUrl, { signal: AbortSignal.timeout(4500) });
+          if (halRes.ok) {
+            const halData = (await halRes.json()) as any;
+            for (const doc of halData.response?.docs || []) {
+              const title = Array.isArray(doc.title_s) ? doc.title_s[0] : doc.title_s;
+              if (!title) continue;
+              const authors = Array.isArray(doc.authFullName_s)
+                ? doc.authFullName_s.slice(0, 4)
+                : ['HAL Researcher'];
+              const abstract = Array.isArray(doc.abstract_s) ? doc.abstract_s[0] : doc.abstract_s;
+              papers.push({
+                id: `hal-${doc.docid || Math.random().toString(36).slice(2, 8)}`,
+                title: String(title),
+                authors,
+                year: doc.producedDateY_i,
+                venue: doc.journalTitle_s || 'HAL Open Science',
+                abstract: abstract ? String(abstract).slice(0, 360) : undefined,
+                url: doc.uri_s || `https://hal.science/${doc.docid}`,
+                pdfUrl: doc.fileMain_s || undefined,
+                source: 'HAL Science',
               });
             }
           }
@@ -2943,7 +3155,13 @@ ${transcript.slice(0, 150000)}
         topics?: string[];
         updatedAt?: string;
         ownerAvatar?: string;
-        source: 'GitHub' | 'HuggingFace Model' | 'HuggingFace Dataset' | 'npm Registry';
+        source:
+          | 'GitHub'
+          | 'HuggingFace Model'
+          | 'HuggingFace Dataset'
+          | 'HuggingFace Space'
+          | 'npm Registry'
+          | 'PyPI Package';
       }> = [];
 
       await Promise.allSettled([
@@ -3068,6 +3286,65 @@ ${transcript.slice(0, 150000)}
             }
           }
         })(),
+
+        // 5. HuggingFace Interactive AI Spaces API
+        (async () => {
+          const hfHeaders: Record<string, string> = {};
+          if (process.env.HUGGINGFACE_API_KEY) {
+            hfHeaders.Authorization = `Bearer ${process.env.HUGGINGFACE_API_KEY}`;
+          }
+          const spUrl = `https://huggingface.co/api/spaces?search=${encodeURIComponent(
+            q
+          )}&limit=5&sort=likes&direction=-1`;
+          const spRes = await fetch(spUrl, { headers: hfHeaders, signal: AbortSignal.timeout(4000) });
+          if (spRes.ok) {
+            const spData = (await spRes.json()) as any[];
+            for (const sp of (spData || []).slice(0, 5)) {
+              const id = sp.id || sp.modelId;
+              if (!id) continue;
+              repos.push({
+                id: `hf-space-${id}`,
+                name: id.split('/').pop() || id,
+                fullName: id,
+                description: `Interactive AI demo & live web application hosted on HuggingFace Spaces (${sp.sdk || 'Gradio/Streamlit'}).`,
+                url: `https://huggingface.co/spaces/${id}`,
+                stars: sp.likes || 0,
+                language: sp.sdk ? `HF Space (${sp.sdk})` : 'HuggingFace Space',
+                updatedAt: sp.lastModified,
+                source: 'HuggingFace Space',
+              });
+            }
+          }
+        })(),
+
+        // 6. PyPI Python Package Index
+        (async () => {
+          const slug = q
+            .toLowerCase()
+            .trim()
+            .replace(/[^a-z0-9-_]+/g, '-')
+            .replace(/^-+|-+$/g, '');
+          if (!slug || slug.length < 2) return;
+          const pypiUrl = `https://pypi.org/pypi/${encodeURIComponent(slug)}/json`;
+          const pyRes = await fetch(pypiUrl, { signal: AbortSignal.timeout(3500) });
+          if (pyRes.ok) {
+            const pyData = (await pyRes.json()) as any;
+            const info = pyData.info;
+            if (info && info.name) {
+              repos.push({
+                id: `pypi-${info.name}`,
+                name: info.name,
+                fullName: `pypi/${info.name}@${info.version || 'latest'}`,
+                description: info.summary || `Official Python package on PyPI (${info.name}).`,
+                url: info.package_url || info.project_url || `https://pypi.org/project/${info.name}/`,
+                stars: 500,
+                language: 'Python (PyPI)',
+                topics: info.keywords ? String(info.keywords).split(/[\s,]+/).filter(Boolean).slice(0, 5) : [],
+                source: 'PyPI Package',
+              });
+            }
+          }
+        })(),
       ]);
 
       res.json({ ok: true, query: q, page, hasMore: repos.length > 0, repos });
@@ -3098,7 +3375,14 @@ ${transcript.slice(0, 150000)}
         isAnswered?: boolean;
         publishedAt?: string;
         tags?: string[];
-        source: 'StackOverflow' | 'Reddit' | 'DEV.to' | 'Hacker News';
+        source:
+          | 'StackOverflow'
+          | 'StackExchange'
+          | 'Reddit'
+          | 'DEV.to'
+          | 'Hacker News'
+          | 'Lobste.rs'
+          | 'GitHub Discussions';
       }> = [];
 
       await Promise.allSettled([
@@ -3217,6 +3501,81 @@ ${transcript.slice(0, 150000)}
             }
           }
         })(),
+
+        // 5. StackExchange Data Science / CrossValidated Q&A API
+        (async () => {
+          const sePage = page + 1;
+          const seKeyParam = process.env.STACKEXCHANGE_KEY
+            ? `&key=${encodeURIComponent(process.env.STACKEXCHANGE_KEY)}`
+            : '';
+          const seUrl = `https://api.stackexchange.com/2.3/search/advanced?order=desc&sort=relevance&q=${encodeURIComponent(
+            q
+          )}&site=stats&pagesize=5&page=${sePage}${seKeyParam}`;
+          const seRes = await fetch(seUrl, { signal: AbortSignal.timeout(4000) });
+          if (seRes.ok) {
+            const seData = (await seRes.json()) as any;
+            for (const item of seData.items || []) {
+              if (!item.title) continue;
+              discussions.push({
+                id: `se-stats-${item.question_id}`,
+                title: String(item.title)
+                  .replace(/&quot;/g, '"')
+                  .replace(/&#39;/g, "'")
+                  .replace(/&amp;/g, '&'),
+                snippet: `CrossValidated / StackExchange Q&A (${item.answer_count || 0} answers, ${(
+                  item.view_count || 0
+                ).toLocaleString()} views).`,
+                url: item.link,
+                author: item.owner?.display_name || 'Researcher',
+                community: 'CrossValidated SE',
+                score: item.score || 0,
+                commentsCount: item.answer_count || 0,
+                isAnswered: item.is_answered,
+                tags: Array.isArray(item.tags) ? item.tags.slice(0, 4) : [],
+                source: 'StackExchange',
+              });
+            }
+          }
+        })(),
+
+        // 6. GitHub Engineering Issues & Technical Discussions API
+        (async () => {
+          const ghHeaders: Record<string, string> = {
+            Accept: 'application/vnd.github+json',
+            'User-Agent': 'OpenTranscriptAI/1.0',
+          };
+          if (process.env.GITHUB_TOKEN) {
+            ghHeaders.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
+          }
+          const ghUrl = `https://api.github.com/search/issues?q=${encodeURIComponent(
+            q
+          )}&sort=comments&order=desc&per_page=5&page=${page + 1}`;
+          const ghRes = await fetch(ghUrl, { headers: ghHeaders, signal: AbortSignal.timeout(4000) });
+          if (ghRes.ok) {
+            const ghData = (await ghRes.json()) as any;
+            for (const issue of ghData.items || []) {
+              if (!issue.title) continue;
+              const repoSlug = issue.repository_url
+                ? String(issue.repository_url).split('/').slice(-2).join('/')
+                : 'GitHub';
+              discussions.push({
+                id: `gh-issue-${issue.id}`,
+                title: issue.title,
+                snippet: issue.body
+                  ? String(issue.body).replace(/[#*`>\r\n]+/g, ' ').trim().slice(0, 200)
+                  : `Technical discussion in ${repoSlug}.`,
+                url: issue.html_url,
+                author: issue.user?.login || 'maintainer',
+                community: repoSlug,
+                score: issue.reactions?.total_count || 1,
+                commentsCount: issue.comments || 0,
+                isAnswered: issue.state === 'closed',
+                publishedAt: issue.created_at,
+                source: 'GitHub Discussions',
+              });
+            }
+          }
+        })(),
       ]);
 
       res.json({ ok: true, query: q, page, hasMore: discussions.length > 0, discussions });
@@ -3245,7 +3604,12 @@ ${transcript.slice(0, 150000)}
         thumbnailUrl?: string;
         publishedAt?: string;
         durationOrSize?: string;
-        category: 'Podcast Episode' | 'Zenodo Dataset' | 'Internet Archive';
+        category:
+          | 'Podcast Episode'
+          | 'Zenodo Dataset'
+          | 'Internet Archive'
+          | 'Library of Congress'
+          | 'Wikimedia Commons Audio';
       }> = [];
 
       await Promise.allSettled([
@@ -3337,9 +3701,14 @@ ${transcript.slice(0, 150000)}
           }
         })(),
 
-        // 3. Internet Archive Open Lectures, Audio & Texts API
+        // 3. Internet Archive Open Lectures, Audio & Texts API (sorted by downloads desc)
         (async () => {
-          const iaUrl = `https://archive.org/advancedsearch.php?q=${encodeURIComponent(q)}&fl[]=identifier,title,creator,description,mediatype,publicdate&rows=6&page=${page + 1}&output=json`;
+          const iaQuery = `title:(${q})`;
+          const iaUrl = `https://archive.org/advancedsearch.php?q=${encodeURIComponent(
+            iaQuery
+          )}&sort[]=downloads+desc&fl[]=identifier,title,creator,description,mediatype,publicdate&rows=6&page=${
+            page + 1
+          }&output=json`;
           const iaRes = await fetch(iaUrl, { signal: AbortSignal.timeout(4500) });
           if (iaRes.ok) {
             const iaData = (await iaRes.json()) as any;
@@ -3359,6 +3728,37 @@ ${transcript.slice(0, 150000)}
                 publishedAt: doc.publicdate,
                 durationOrSize: String(doc.mediatype || 'archive').toUpperCase(),
                 category: 'Internet Archive',
+              });
+            }
+          }
+        })(),
+
+        // 4. Library of Congress (LOC.gov) Public Archival Collections API
+        (async () => {
+          const locUrl = `https://www.loc.gov/search/?q=${encodeURIComponent(q)}&fo=json&c=5&sp=${page + 1}`;
+          const locRes = await fetch(locUrl, {
+            signal: AbortSignal.timeout(4500),
+            headers: { 'User-Agent': 'OpenTranscriptAI/1.0' },
+          });
+          if (locRes.ok) {
+            const locData = (await locRes.json()) as any;
+            for (const r of (locData.results || []).slice(0, 5)) {
+              if (!r.title) continue;
+              const desc = Array.isArray(r.description) ? r.description[0] : r.description;
+              const creator = Array.isArray(r.contributor) ? r.contributor[0] : 'Library of Congress';
+              const thumb = Array.isArray(r.image_url) ? r.image_url[0] : undefined;
+              items.push({
+                id: `loc-${r.id || Math.random().toString(36).slice(2, 8)}`,
+                title: String(r.title),
+                creator: String(creator),
+                description: desc
+                  ? String(desc).slice(0, 240)
+                  : 'Primary historical record in the U.S. Library of Congress digital archive.',
+                url: r.url || r.id || `https://www.loc.gov/search/?q=${encodeURIComponent(q)}`,
+                thumbnailUrl: thumb,
+                publishedAt: r.date,
+                durationOrSize: r.original_format ? String(r.original_format[0] || 'Archive') : 'LOC Record',
+                category: 'Library of Congress',
               });
             }
           }
@@ -3637,15 +4037,15 @@ ${transcript.slice(0, 150000)}
 
     res.json({
       ok: true,
-      totalEngines: 45,
+      totalEngines: 55,
       configuredKeys,
       categories: {
         aiModels: ['Google Gemini', 'OpenRouter', 'OpenAI GPT-4o', 'Anthropic Claude 3.5', 'Groq LPU'],
-        academic: ['OpenAlex', 'Semantic Scholar', 'arXiv', 'Crossref DOI', 'PubMed NCBI', 'Europe PMC', 'DOAJ', 'CORE.ac.uk'],
-        codeAndAi: ['GitHub REST API', 'HuggingFace Models', 'HuggingFace Datasets', 'npm Registry'],
-        community: ['StackOverflow v2.3', 'Reddit JSON API', 'DEV.to Articles', 'Hacker News Algolia'],
-        mediaAndData: ['YouTube Data API v3', 'Apple iTunes Podcasts', 'Listen Notes Podcasts', 'CERN Zenodo Datasets', 'Internet Archive'],
-        booksAndWeb: ['Google Books', 'OpenLibrary', 'Google Custom Search', 'Tavily AI Search', 'Serper.dev', 'Brave Search', 'Exa Neural Search', 'Wikipedia', 'Wikidata', 'DuckDuckGo', 'Free Dictionary', 'Datamuse'],
+        academic: ['OpenAlex', 'Semantic Scholar', 'arXiv', 'Crossref DOI', 'PubMed NCBI', 'Europe PMC', 'DOAJ', 'CORE.ac.uk', 'DBLP CS', 'HAL Open Science'],
+        codeAndAi: ['GitHub REST API', 'HuggingFace Models', 'HuggingFace Datasets', 'HuggingFace Spaces', 'npm Registry', 'PyPI Python Index'],
+        community: ['StackOverflow v2.3', 'CrossValidated SE', 'Reddit JSON API', 'DEV.to Articles', 'Hacker News Algolia', 'GitHub Discussions'],
+        mediaAndData: ['YouTube Data API v3', 'Apple iTunes Podcasts', 'Listen Notes Podcasts', 'CERN Zenodo Datasets', 'Internet Archive', 'Library of Congress'],
+        booksAndWeb: ['Google Books', 'OpenLibrary', 'Project Gutenberg (Gutendex)', 'Internet Archive Texts', 'Google Custom Search', 'Tavily AI Search', 'Serper.dev', 'Brave Search', 'Exa Neural Search', 'Wikipedia', 'Wikidata', 'DuckDuckGo', 'Free Dictionary', 'Datamuse'],
         newsAndVisuals: ['Google News', 'NewsAPI.org', 'GNews.io', 'The Guardian', 'New York Times', 'Unsplash', 'Pexels', 'Pixabay', 'Openverse CC', 'Wikimedia Commons'],
         speechAndTranslation: ['Microsoft Edge Neural TTS (WordBoundary)', 'Gemini 2.5 Flash TTS', 'ElevenLabs TTS', 'DeepL Neural Translate', 'Google Neural Translate GTX'],
       },

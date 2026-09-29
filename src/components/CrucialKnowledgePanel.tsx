@@ -28,6 +28,7 @@ import {
 import { APP_THEMES } from '../constants';
 import { extractCrucialKnowledge, formatKnowledgeAsMarkdown } from '../services/knowledgeExtractionService';
 import { speechService } from '../services/speechService';
+import { SmartImage } from './SmartImage';
 
 interface CrucialKnowledgePanelProps {
   summaryMarkdown: string;
@@ -647,10 +648,10 @@ export const CrucialKnowledgePanel: React.FC<CrucialKnowledgePanelProps> = ({
               {dictResult.wikipedia && (
                 <div className="flex flex-col sm:flex-row items-start gap-4">
                   {dictResult.wikipedia.thumbnailUrl && (
-                    <img
+                    <SmartImage
                       src={dictResult.wikipedia.thumbnailUrl}
                       alt={dictResult.wikipedia.title}
-                      referrerPolicy="no-referrer"
+                      variant="wiki"
                       className="w-24 sm:w-32 rounded-lg object-cover shrink-0 bg-black/20"
                     />
                   )}

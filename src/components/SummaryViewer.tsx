@@ -29,6 +29,7 @@ import { speechService, SpeechItem, tokenizeSpeechWords } from '../services/spee
 import { SummaryResult, SummaryType, ThemeId, TypographyConfig } from '../types';
 import { SUMMARY_PRESETS, APP_THEMES } from '../constants';
 import { getTypographyStyles, getContentWidthClass } from './TypographySettingsModal';
+import { SmartImage } from './SmartImage';
 
 interface SummaryViewerProps {
   summary: SummaryResult | null;
@@ -611,15 +612,13 @@ export const SummaryViewer: React.FC<SummaryViewerProps> = ({
           {children}
         </blockquote>
       ),
-      img: ({ src, alt, ...props }: any) => (
+      img: ({ src, alt }: any) => (
         <span className="my-6 block text-center">
-          <img
+          <SmartImage
             src={src}
             alt={alt || 'Figure'}
-            referrerPolicy="no-referrer"
+            variant="figure"
             className="rounded-lg max-h-[520px] w-auto max-w-full object-contain mx-auto"
-            loading="lazy"
-            {...props}
           />
           {alt && (
             <span className="text-xs text-slate-400 mt-2 italic text-center block">
@@ -941,6 +940,18 @@ export const SummaryViewer: React.FC<SummaryViewerProps> = ({
               >
                 <Plus className="w-3 h-3 opacity-75" />
                 <span>Save</span>
+              </button>
+            )}
+
+            {onOpenResearch && (
+              <button
+                type="button"
+                onClick={onOpenResearch}
+                className="flex items-center gap-1 px-1.5 py-0.5 rounded font-semibold bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 transition-colors cursor-pointer whitespace-nowrap"
+                title="View exact books, papers, citations, and 55+ live sources for this video"
+              >
+                <Globe className="w-3 h-3" />
+                <span>Exact Resources</span>
               </button>
             )}
 
