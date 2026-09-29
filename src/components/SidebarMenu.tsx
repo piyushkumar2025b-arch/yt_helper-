@@ -19,7 +19,13 @@ import {
   Check,
   Search,
   Bookmark,
+  Cloud,
+  LogIn,
+  LogOut,
+  Plus,
 } from 'lucide-react';
+import { User } from 'firebase/auth';
+import { SavedCloudSummary } from '../services/listsService';
 import {
   VideoMetadata,
   SummaryType,
@@ -42,7 +48,7 @@ interface SidebarMenuProps {
   onClose: () => void;
   width: number;
   currentUrl: string;
-  onSubmitUrl: (url: string) => void;
+  onSubmitUrl: (url: string, savedMarkdown?: string) => void;
   isLoading: boolean;
   onOpenManualModal: () => void;
   metadata: VideoMetadata | null;
@@ -69,6 +75,11 @@ interface SidebarMenuProps {
   onOpenTypography: () => void;
   currentTheme: ThemeId;
   onSelectTheme: (theme: ThemeId) => void;
+  user?: User | null;
+  onSignIn?: () => void;
+  onSignOut?: () => void;
+  savedSummaries?: SavedCloudSummary[];
+  onSaveCurrentToCloud?: () => void;
 }
 
 function isLikelyYouTubeUrlOrId(input: string): boolean {
@@ -110,6 +121,11 @@ export const SidebarMenu: React.FC<SidebarMenuProps> = ({
   onOpenTypography,
   currentTheme,
   onSelectTheme,
+  user = null,
+  onSignIn,
+  onSignOut,
+  savedSummaries = [],
+  onSaveCurrentToCloud,
 }) => {
   const [sourceMode, setSourceMode] = useState<'url' | 'search'>('url');
   const [urlInput, setUrlInput] = useState(currentUrl);
@@ -234,7 +250,7 @@ export const SidebarMenu: React.FC<SidebarMenuProps> = ({
     { id: 'summary', label: 'Video Summary', icon: FileText },
     { id: 'transcript', label: 'Full Transcript', icon: List },
     { id: 'knowledge', label: 'Key Ideas & Words', icon: BookOpen },
-    { id: 'research', label: 'Explore Videos & Books', icon: Globe },
+    { id: 'research', label: 'Exact Resources & Sources', icon: Globe },
     { id: 'lists', label: 'Saved Lists', icon: Bookmark },
     { id: 'scrape', label: 'Downloads & Info', icon: Database },
     { id: 'chat', label: 'Ask Anything', icon: MessageSquare },
@@ -688,7 +704,89 @@ export const SidebarMenu: React.FC<SidebarMenuProps> = ({
           </div>
         </div>
 
-        {/* 6. Theme Selector */}
+        {/* 6. Firebase Cloud Sync & Saved Summaries */}
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between">
+            <label className={`text-[10px] font-semibold uppercase tracking-wider ${themeConfig.textMuted} flex items-center gap-1`}>
+              <Cloud className="w-3 h-3 text-emerald-400" />
+              <span>Firebase Cloud Sync</span>
+            </label>
+            {user ? (
+              <span className="text-[10px] font-semibold text-emerald-400">Connected</span>
+            ) : (
+              <span className={`text-[10px] ${themeConfig.textMuted}`}>Local Cache</span>
+            )}
+          </div>
+
+          <div className="space-y-1">
+            {user ? (
+              <div className="flex items-center justify-between gap-1.5 px-2 py-1 rounded bg-emerald-500/10 text-emerald-400">
+                <span className="text-[10px] font-medium truncate">
+                  {user.displayName || user.email}
+                </span>
+                {onSignOut && (
+                  <button
+                    type="button"
+                    onClick={onSignOut}
+                    className="p-0.5 hover:text-white cursor-pointer shrink-0"
+                    title="Sign Out"
+                  >
+                    <LogOut className="w-3 h-3" />
+                  </button>
+                )}
+              </div>
+            ) : (
+              onSignIn && (
+                <button
+                  type="button"
+                  onClick={onSignIn}
+                  className={`w-full flex items-center justify-center gap-1.5 py-1.5 px-2.5 rounded text-[11px] font-semibold ${themeConfig.primaryButton} cursor-pointer transition-colors`}
+                >
+                  <LogIn className="w-3 h-3" />
+                  <span>Sign In to Sync Firebase</span>
+                </button>
+              )
+            )}
+
+            {onSaveCurrentToCloud && metadata && (
+              <button
+                type="button"
+                onClick={onSaveCurrentToCloud}
+                className={`w-full flex items-center justify-center gap-1.5 py-1 px-2.5 rounded text-[11px] font-medium bg-slate-500/10 hover:bg-slate-500/20 ${themeConfig.textSecondary} hover:${themeConfig.textPrimary} cursor-pointer transition-colors`}
+              >
+                <Plus className="w-3 h-3 text-indigo-400" />
+                <span>Save Summary to Firebase</span>
+              </button>
+            )}
+
+            {savedSummaries.length > 0 && (
+              <div className="pt-1 space-y-1">
+                <div className={`text-[10px] font-medium ${themeConfig.textMuted} px-1`}>
+                  Saved Summaries ({savedSummaries.length})
+                </div>
+                <div className="max-h-36 overflow-y-auto space-y-0.5 pr-0.5">
+                  {savedSummaries.slice(0, 12).map((s) => (
+                    <button
+                      key={s.id}
+                      type="button"
+                      onClick={() => {
+                        onSelectTab('summary');
+                        onSubmitUrl(s.videoUrl || currentUrl, s.markdown);
+                      }}
+                      className={`w-full flex items-center justify-between gap-1.5 px-2 py-1 rounded text-[11px] ${themeConfig.textSecondary} hover:${themeConfig.textPrimary} hover:bg-slate-500/10 text-left cursor-pointer truncate`}
+                      title={`Load saved summary: ${s.videoTitle}`}
+                    >
+                      <span className="truncate">{s.videoTitle}</span>
+                      <Play className="w-2.5 h-2.5 opacity-50 shrink-0" />
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* 7. Theme Selector */}
         <div className="space-y-1.5">
           <label className={`text-[10px] font-semibold uppercase tracking-wider ${themeConfig.textMuted} block`}>
             Themes (12)

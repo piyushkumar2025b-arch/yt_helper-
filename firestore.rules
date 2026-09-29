@@ -53,6 +53,38 @@ service cloud.firestore {
         && data.updatedAt is timestamp;
     }
 
+    function isValidSavedSummary(data) {
+      return data.keys().hasAll(['ownerId', 'videoId', 'videoUrl', 'videoTitle', 'authorName', 'summaryType', 'markdown', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'videoId', 'videoUrl', 'videoTitle', 'authorName', 'summaryType', 'markdown', 'createdAt', 'updatedAt'])
+        && data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 && data.ownerId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.ownerId == request.auth.uid
+        && data.videoId is string && data.videoId.size() <= 64
+        && data.videoUrl is string && data.videoUrl.size() <= 1000
+        && data.videoTitle is string && data.videoTitle.size() >= 1 && data.videoTitle.size() <= 300
+        && data.authorName is string && data.authorName.size() <= 200
+        && data.summaryType is string && data.summaryType.size() >= 1 && data.summaryType.size() <= 64
+        && data.markdown is string && data.markdown.size() >= 1 && data.markdown.size() <= 50000
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidCustomResource(data) {
+      return data.keys().hasAll(['ownerId', 'videoId', 'title', 'resourceType', 'description', 'primaryUrl', 'authorOrCreator', 'formattedTime', 'exactQuote', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'videoId', 'title', 'resourceType', 'description', 'primaryUrl', 'authorOrCreator', 'formattedTime', 'exactQuote', 'createdAt', 'updatedAt'])
+        && data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 && data.ownerId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.ownerId == request.auth.uid
+        && data.videoId is string && data.videoId.size() <= 64
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 300
+        && data.resourceType is string && data.resourceType.size() >= 1 && data.resourceType.size() <= 64
+        && data.description is string && data.description.size() <= 2000
+        && data.primaryUrl is string && data.primaryUrl.size() >= 1 && data.primaryUrl.size() <= 1000
+        && data.authorOrCreator is string && data.authorOrCreator.size() <= 200
+        && data.formattedTime is string && data.formattedTime.size() <= 32
+        && data.exactQuote is string && data.exactQuote.size() <= 2000
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
     function isParentListOwner(listId) {
       return exists(/databases/$(database)/documents/lists/$(listId))
         && get(/databases/$(database)/documents/lists/$(listId)).data.ownerId == request.auth.uid;
@@ -123,6 +155,60 @@ service cloud.firestore {
           && existing().ownerId == request.auth.uid
           && isParentListOwner(listId);
       }
+    }
+
+    // 6. Collection: /summaries/{summaryId}
+    match /summaries/{summaryId} {
+      allow get: if isSignedIn() && isValidId(summaryId) && existing().ownerId == request.auth.uid;
+      allow list: if isSignedIn() && existing().ownerId == request.auth.uid;
+
+      allow create: if isVerifiedUser()
+        && isValidId(summaryId)
+        && isValidSavedSummary(incoming())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isVerifiedUser()
+        && isValidId(summaryId)
+        && isValidSavedSummary(incoming())
+        && existing().ownerId == request.auth.uid
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          incoming().diff(existing()).affectedKeys().hasOnly(['videoId', 'videoUrl', 'videoTitle', 'authorName', 'summaryType', 'markdown', 'updatedAt'])
+        );
+
+      allow delete: if isVerifiedUser()
+        && isValidId(summaryId)
+        && existing().ownerId == request.auth.uid;
+    }
+
+    // 7. Collection: /resources/{resourceId}
+    match /resources/{resourceId} {
+      allow get: if isSignedIn() && isValidId(resourceId) && existing().ownerId == request.auth.uid;
+      allow list: if isSignedIn() && existing().ownerId == request.auth.uid;
+
+      allow create: if isVerifiedUser()
+        && isValidId(resourceId)
+        && isValidCustomResource(incoming())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isVerifiedUser()
+        && isValidId(resourceId)
+        && isValidCustomResource(incoming())
+        && existing().ownerId == request.auth.uid
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          incoming().diff(existing()).affectedKeys().hasOnly(['videoId', 'title', 'resourceType', 'description', 'primaryUrl', 'authorOrCreator', 'formattedTime', 'exactQuote', 'updatedAt'])
+        );
+
+      allow delete: if isVerifiedUser()
+        && isValidId(resourceId)
+        && existing().ownerId == request.auth.uid;
     }
   }
 }

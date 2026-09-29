@@ -38,6 +38,7 @@ import {
   deleteItemFromUserList,
   loadLocalLists,
   loadLocalListItems,
+  getDefaultCloudListId,
 } from '../services/listsService';
 import { APP_THEMES } from '../constants';
 import { ThemeId, VideoMetadata } from '../types';
@@ -128,7 +129,8 @@ export const SavedListsPanel: React.FC<SavedListsPanelProps> = ({
             const created = await createUserList(
               'My Favorite Video Summaries',
               'Videos, summaries, and big lessons I want to keep.',
-              'favorites'
+              'favorites',
+              getDefaultCloudListId(user.uid)
             );
             setLists([created]);
             setSelectedListId(created.id);

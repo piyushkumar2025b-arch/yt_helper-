@@ -16,8 +16,22 @@ import { CrucialKnowledgePanel } from './components/CrucialKnowledgePanel';
 import { ScrapedDataViewer } from './components/ScrapedDataViewer';
 import { SavedListsPanel } from './components/SavedListsPanel';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { auth } from './firebase';
-import { addItemToUserList, createUserList, loadLocalLists, subscribeToUserLists, SavedUserList } from './services/listsService';
+import { auth, signInWithGoogle, signOutUser } from './firebase';
+import {
+  addItemToUserList,
+  createUserList,
+  loadLocalLists,
+  loadLocalSummaries,
+  loadLocalCustomResources,
+  subscribeToUserLists,
+  subscribeToSavedSummaries,
+  subscribeToCustomResources,
+  saveSummaryToFirestore,
+  syncLocalDataToFirestore,
+  getDefaultCloudListId,
+  SavedUserList,
+  SavedCloudSummary,
+} from './services/listsService';
 import { speechService } from './services/speechService';
 import {
   appendWebResultToSummary,
@@ -39,6 +53,7 @@ import {
   BookSearchResult,
   AcademicPaperResult,
   TypographyConfig,
+  ExactVideoResource,
 } from './types';
 import { AlertCircle, Check, Minimize2, PanelLeft, X } from 'lucide-react';
 
@@ -99,10 +114,15 @@ export default function App() {
   const [researchInitialQuery, setResearchInitialQuery] = useState<string>('');
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [userLists, setUserLists] = useState<SavedUserList[]>([]);
+  const [savedSummaries, setSavedSummaries] = useState<SavedCloudSummary[]>(() => loadLocalSummaries());
+  const [customResources, setCustomResources] = useState<ExactVideoResource[]>(() => loadLocalCustomResources());
 
   useEffect(() => {
     const unsubAuth = onAuthStateChanged(auth, (u) => {
       setCurrentUser(u);
+      if (u) {
+        syncLocalDataToFirestore();
+      }
     });
     return () => unsubAuth();
   }, []);
@@ -110,14 +130,44 @@ export default function App() {
   useEffect(() => {
     if (currentUser) {
       setUserLists([]);
-      const unsub = subscribeToUserLists(currentUser.uid, (lists) => {
+      const unsubLists = subscribeToUserLists(currentUser.uid, (lists) => {
         setUserLists(lists);
       });
-      return () => unsub();
+      const unsubSummaries = subscribeToSavedSummaries(currentUser.uid, (summaries) => {
+        setSavedSummaries(summaries);
+      });
+      const unsubResources = subscribeToCustomResources(currentUser.uid, (resources) => {
+        setCustomResources(resources);
+      });
+      return () => {
+        unsubLists();
+        unsubSummaries();
+        unsubResources();
+      };
     } else {
       setUserLists(loadLocalLists());
+      setSavedSummaries(loadLocalSummaries());
+      setCustomResources(loadLocalCustomResources());
     }
   }, [currentUser]);
+
+  const handleSignInWithGoogle = async () => {
+    try {
+      await signInWithGoogle();
+      setAppendNotice('Connected to Firebase! Your lists, summaries & exact resources are synced.');
+      setTimeout(() => setAppendNotice(null), 4000);
+    } catch (err: any) {
+      setErrorMessage(err?.message || 'Could not sign in with Google.');
+    }
+  };
+
+  const handleSignOut = async () => {
+    try {
+      await signOutUser();
+      setAppendNotice('Signed out of Firebase. Using local storage.');
+      setTimeout(() => setAppendNotice(null), 3500);
+    } catch {}
+  };
 
   // Typography state with localStorage persistence (default full width)
   const [isTypographyOpen, setIsTypographyOpen] = useState<boolean>(false);
@@ -337,7 +387,7 @@ export default function App() {
       })
       .join('\n\n');
 
-    return `# ${title}\n\n## What This Video Is Really About\n${intro || textToSummarize.slice(0, 600)}\n\n---\n\n## Step-by-Step Story Walkthrough\n\n${timeline}\n\n---\n\n## Practical Takeaways\n1. **Follow your genuine curiosity**: Even unexpected detours often connect in meaningful ways later on.\n2. **Keep a beginner's mindset**: Treat setbacks as opportunities to experiment and build something better.`;
+    return `# ${title}\n\n## What This Video Is Really About\n${intro || textToSummarize.slice(0, 600)}\n\n---\n\n## Step-by-Step Story Walkthrough\n\n${timeline}\n\n---\n\n## Practical Takeaways\n1. **Follow your genuine curiosity**: Even unexpected detours often connect in meaningful ways later on.\n2. **Keep a beginner's mindset**: Treat setbacks as opportunities to experiment and build something better.\n\n---\n\n## Exact Resources, Books, Archives & Direct Sources Mentioned\n- **[12:48]** [**The Whole Earth Catalog (Stewart Brand, 1968–1974)**](https://archive.org/details/wholeearth) — Counterculture catalog with the farewell message *"Stay Hungry. Stay Foolish."*\n- **[02:15]** [**Reed College Calligraphy Program (Robert Palladino)**](https://www.reed.edu/reed-magazine/in-memoriam/obituaries/2016/robert-palladino-faculty.html) — The calligraphy course that inspired Macintosh proportional typography.\n- **[07:05]** [**NeXT Computer & Pixar Animation Studios**](https://en.wikipedia.org/wiki/NeXT) — Founded during Jobs's years away from Apple.\n- **[00:00]** [**Stanford 2005 Commencement Official Text Archive**](https://news.stanford.edu/stories/2005/06/youve-got-find-love-jobs-says)`;
   };
 
   // Main Action: Fetch Transcript and Generate Summary (or restore saved summary)
@@ -615,7 +665,7 @@ export default function App() {
     setTimeout(() => setAppendNotice(null), 4000);
   };
 
-  const handleAppendCustomMarkdown = (snippet: string) => {
+  const handleAppendCustomMarkdown = (snippet: string, noticeLabel?: string) => {
     if (!summary) {
       setAppendNotice('Generate a summary first before appending notes.');
       setTimeout(() => setAppendNotice(null), 3000);
@@ -623,7 +673,7 @@ export default function App() {
     }
     const updatedMarkdown = summary.markdown + snippet;
     setSummary({ ...summary, markdown: updatedMarkdown });
-    setAppendNotice('Appended knowledge guide to summary document.');
+    setAppendNotice(noticeLabel || 'Appended resource to summary document.');
     setTimeout(() => setAppendNotice(null), 4000);
   };
 
@@ -677,7 +727,8 @@ export default function App() {
       const created = await createUserList(
         'My Favorite Video Summaries',
         'Videos, summaries, and big lessons I want to keep.',
-        'favorites'
+        'favorites',
+        getDefaultCloudListId(currentUser.uid)
       );
       setUserLists((prev) => [created, ...prev]);
       return created;
@@ -701,7 +752,9 @@ export default function App() {
         return;
       }
       await addItemToUserList(targetList.id, item);
-      setAppendNotice(`Saved "${item.title.slice(0, 42)}" to "${targetList.name}"`);
+      setAppendNotice(
+        `Saved "${item.title.slice(0, 42)}" to ${currentUser ? 'Firebase' : `"${targetList.name}"`}`
+      );
       setTimeout(() => setAppendNotice(null), 4000);
     } catch {
       setActiveTab('lists');
@@ -711,20 +764,33 @@ export default function App() {
   const handleQuickSaveCurrentVideo = async () => {
     if (!metadata) return;
     try {
-      const targetList = await getOrCreateTargetList();
-      if (!targetList) {
-        setActiveTab('lists');
-        return;
-      }
-      await addItemToUserList(targetList.id, {
-        itemType: 'summary',
-        title: metadata.title || 'YouTube Video Summary',
-        url: currentUrl || metadata.url || '',
-        subtitle: metadata.authorName || 'YouTube Channel',
-        content: summary?.markdown || fullText || '',
-        notes: '',
+      await saveSummaryToFirestore({
+        videoId: metadata.videoId || '',
+        videoUrl: currentUrl || metadata.url || '',
+        videoTitle: metadata.title || 'YouTube Video Summary',
+        authorName: metadata.authorName || 'YouTube Channel',
+        summaryType,
+        markdown: summary?.markdown || fullText || 'Summary',
       });
-      setAppendNotice(`Saved "${metadata.title}" to "${targetList.name}"`);
+      if (!currentUser) {
+        setSavedSummaries(loadLocalSummaries());
+      }
+      const targetList = await getOrCreateTargetList();
+      if (targetList) {
+        await addItemToUserList(targetList.id, {
+          itemType: 'summary',
+          title: metadata.title || 'YouTube Video Summary',
+          url: currentUrl || metadata.url || '',
+          subtitle: metadata.authorName || 'YouTube Channel',
+          content: summary?.markdown || fullText || '',
+          notes: '',
+        });
+      }
+      setAppendNotice(
+        currentUser
+          ? `Saved "${metadata.title}" to Firebase Firestore!`
+          : `Saved "${metadata.title}" to "${targetList?.name || 'Saved Lists'}" (Sign in to sync to Firebase)`
+      );
       setTimeout(() => setAppendNotice(null), 4000);
     } catch {
       setActiveTab('lists');
@@ -805,6 +871,10 @@ export default function App() {
           onToggleMainOptions={() => setIsMainOptionsOpen((prev) => !prev)}
           showVideo={showVideo}
           onToggleShowVideo={() => setShowVideo((prev) => !prev)}
+          user={currentUser}
+          onSignIn={handleSignInWithGoogle}
+          onSignOut={handleSignOut}
+          onQuickSaveToCloud={handleQuickSaveCurrentVideo}
         />
       )}
 
@@ -855,6 +925,11 @@ export default function App() {
               onOpenTypography={() => setIsTypographyOpen(true)}
               currentTheme={theme}
               onSelectTheme={handleSelectTheme}
+              user={currentUser}
+              onSignIn={handleSignInWithGoogle}
+              onSignOut={handleSignOut}
+              savedSummaries={savedSummaries}
+              onSaveCurrentToCloud={handleQuickSaveCurrentVideo}
             />
 
             <MenuSliderDivider
@@ -967,6 +1042,11 @@ export default function App() {
                 onSyncTimestamp={setActiveTimestamp}
                 transcriptText={fullText}
                 videoTitle={metadata?.title || 'YouTube Video'}
+                videoMetadata={metadata}
+                transcriptSegments={segments}
+                customResources={customResources}
+                onRefreshCustomResources={setCustomResources}
+                onAppendCustomMarkdown={handleAppendCustomMarkdown}
                 openRouterKey={openRouterKey}
                 selectedModelId={selectedModel.id}
                 currentTheme={theme}
@@ -1021,6 +1101,8 @@ export default function App() {
                 videoTitle={metadata?.title || 'YouTube Video'}
                 videoMetadata={metadata}
                 transcriptSegments={segments}
+                customResources={customResources}
+                onRefreshCustomResources={setCustomResources}
                 onSeekToTimestamp={handleSeekToTimestamp}
                 onAppendWebResult={handleAppendWebResult}
                 onAppendImageResult={handleAppendImageResult}

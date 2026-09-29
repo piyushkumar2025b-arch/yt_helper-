@@ -275,7 +275,17 @@ His core message is simple and deeply human: **life rarely goes according to a n
 1. **Follow your genuine curiosity, even when it looks "useless" right now**: Just like Steve's calligraphy class, the things you explore out of pure interest often end up shaping your most original work years later.
 2. **Treat setbacks as a fresh start**: When a job, project, or plan falls apart, let go of the pressure to look successful and enjoy the freedom of experimenting like a beginner again.
 3. **Use the morning mirror test**: If you find yourself dreading your daily routine for weeks on end, take it as an honest signal that something needs to change.
-4. **Protect your own voice**: Other people always have loud opinions about what you "should" do. Only you have to live your life, so trust your gut.`;
+4. **Protect your own voice**: Other people always have loud opinions about what you "should" do. Only you have to live your life, so trust your gut.
+
+---
+
+## Exact Resources, Books, Archives & Direct Sources Mentioned
+
+- **[12:48]** [**The Whole Earth Catalog (Stewart Brand, 1968–1974 Final Issue)**](https://archive.org/details/wholeearth) — Counterculture maker catalog described by Steve Jobs as *"one of the bibles of my generation"* with the final back-cover message *"Stay Hungry. Stay Foolish."* ([Wikipedia](https://en.wikipedia.org/wiki/Whole_Earth_Catalog) · [OpenLibrary](https://openlibrary.org/search?q=Whole+Earth+Catalog+Stewart+Brand))
+- **[02:15]** [**Reed College Calligraphy Program (Prof. Robert Palladino)**](https://www.reed.edu/reed-magazine/in-memoriam/obituaries/2016/robert-palladino-faculty.html) — The serif/sans-serif calligraphy course Jobs audited after dropping out, which directly inspired Macintosh typography ([Reed College](https://en.wikipedia.org/wiki/Reed_College) · [Fonts on Macintosh](https://en.wikipedia.org/wiki/Fonts_on_Macintosh))
+- **[03:45]** [**Apple Macintosh 128K & Original Mac Team Stories (1984)**](https://www.folklore.org/) — First personal computer with proportional bitmap typography and multiple typefaces ([Wikipedia](https://en.wikipedia.org/wiki/Macintosh_128K))
+- **[07:05]** [**NeXT Computer & Pixar Animation Studios (Toy Story, 1995)**](https://en.wikipedia.org/wiki/NeXT) — Founded during Jobs's exile from Apple; NeXTSTEP became the foundation of modern macOS/iOS and Pixar created *Toy Story* ([Pixar History](https://en.wikipedia.org/wiki/Pixar))
+- **[00:00]** [**Stanford University Official 2005 Commencement Verbatim Text**](https://news.stanford.edu/stories/2005/06/youve-got-find-love-jobs-says) & [**Make Something Wonderful (Steve Jobs Archive Free Book)**](https://stevejobsarchive.com/)`;
     }
 
     if (/but what is a neural network|3blue1brown|mnist|pixel|sigmoid|relu/i.test(`${title} ${rawTranscript}`)) {
@@ -315,7 +325,16 @@ Grant Sanderson (3Blue1Brown) pulls back the curtain on **neural networks** by s
 
 ## Practical Takeaways
 1. **Demystify AI**: Whenever you hear about a massive AI model with billions of parameters, remember those "parameters" are just the weights and biases (dials and knobs) connecting layers of numbers.
-2. **Break big problems into smaller pieces**: Just as the network breaks a full digit into loops, and loops into tiny edges, complex problems become solvable when broken into layered building blocks.`;
+2. **Break big problems into smaller pieces**: Just as the network breaks a full digit into loops, and loops into tiny edges, complex problems become solvable when broken into layered building blocks.
+
+---
+
+## Exact Resources, Books, Papers & Code Mentioned
+
+- **[01:05]** [**MNIST Handwritten Digit Database (Yann LeCun, Corinna Cortes, C.J.C. Burges)**](https://huggingface.co/datasets/ylecun/mnist) — The 70,000-image 28×28 grayscale benchmark dataset used throughout the video ([Wikipedia](https://en.wikipedia.org/wiki/MNIST_database) · [PapersWithCode](https://paperswithcode.com/dataset/mnist))
+- **[16:50]** [**Neural Networks and Deep Learning (Michael Nielsen Free Interactive Book & Code)**](http://neuralnetworksanddeeplearning.com/) — The exact free online book and Python code recommended by Grant Sanderson to build this 784→16→16→10 digit classifier ([GitHub: mnielsen/neural-networks-and-deep-learning](https://github.com/mnielsen/neural-networks-and-deep-learning))
+- **[03:15]** [**3Blue1Brown Interactive Neural Networks Lesson & Manim Engine**](https://www.3blue1brown.com/lessons/neural-networks) — Official interactive web lesson and open-source Python math animation library ([GitHub: 3b1b/manim](https://github.com/3b1b/manim))
+- **[15:25]** [**Deep Sparse Rectifier Neural Networks (Glorot, Bordes, Bengio, 2011 — ReLU Paper)**](https://proceedings.mlr.press/v15/glorot11a.html) — Foundational paper showing why ReLU outperforms Sigmoid in deep networks ([Google Scholar](https://scholar.google.com/scholar?q=Deep+Sparse+Rectifier+Neural+Networks))`;
     }
 
     if (/simplest math problem|collatz|3x\s*\+\s*1|veritasium/i.test(`${title} ${rawTranscript}`)) {
@@ -344,7 +363,15 @@ Derek Muller (Veritasium) explores the **Collatz Conjecture** (also known as the
 
 ## Practical Takeaways
 1. **Simple rules can create wild complexity**: Just two basic arithmetic rules produce chaotic patterns that push modern mathematics to its limits.
-2. **Testing millions of examples is not the same as a proof**: Even 300 quintillion successes in a row doesn't guarantee there isn't an exception hiding further out.`;
+2. **Testing millions of examples is not the same as a proof**: Even 300 quintillion successes in a row doesn't guarantee there isn't an exception hiding further out.
+
+---
+
+## Exact Resources, Papers & Mathematical Datasets Mentioned
+
+- **[16:20]** [**Almost All Orbits of the Collatz Map Attain Almost Bounded Values (Terence Tao, 2019)**](https://arxiv.org/abs/1909.03562) — Terence Tao's breakthrough paper proving logarithmic density bounds on 3x + 1 orbits ([PDF](https://arxiv.org/pdf/1909.03562.pdf))
+- **[01:40]** [**The Ultimate Challenge: The 3x + 1 Problem (Jeffrey C. Lagarias Survey)**](https://arxiv.org/abs/math/0309224) — Comprehensive annotated bibliography and history of the Collatz conjecture ([Wikipedia](https://en.wikipedia.org/wiki/Collatz_conjecture))
+- **[05:10]** [**OEIS A006577 Hailstone Stopping Times**](https://oeis.org/A006577) & [**2^68 Computational Verification Dataset**](https://pcbarina.fit.vutbr.cz/) — Exact stopping time sequences and distributed supercomputing verification records`;
     }
 
     const sentences = rawTranscript
@@ -388,7 +415,15 @@ ${keyStatements || `> "${rawTranscript.slice(0, 300)}"`}
 
 ## Practical Takeaways
 1. **Core Takeaway**: ${sentences[Math.floor(totalSentences * 0.7)] || sentences[0] || 'Review the timeline above to jump directly to any moment in the video.'}
-2. **Closing Thought**: ${sentences[totalSentences - 1] || 'Wrapped up directly from the full video transcript.'}`;
+2. **Closing Thought**: ${sentences[totalSentences - 1] || 'Wrapped up directly from the full video transcript.'}
+
+---
+
+## Exact Resources & Direct Research Portals
+- [**Google Scholar Academic Citations for "${title}"**](https://scholar.google.com/scholar?q=${encodeURIComponent(title)})
+- [**OpenLibrary Books & Publications on "${title}"**](https://openlibrary.org/search?q=${encodeURIComponent(title)})
+- [**Internet Archive Primary Scans & Media for "${title}"**](https://archive.org/search?query=${encodeURIComponent(title)})
+- [**Wikipedia Reference Index for "${title}"**](https://en.wikipedia.org/wiki/Special:Search?search=${encodeURIComponent(title)})`;
   }
 
   function buildHumanDeepDive(topic: string, transcript: string, title: string): string {
@@ -674,8 +709,8 @@ For each major idea or concept in the video:
 ## Common Questions & Clear Answers
 - 5-7 natural questions someone might ask after watching this video, answered clearly and directly.
 
-## People, Books & Things Mentioned
-- A handy list of the people, books, tools, companies, or places talked about in the video.`;
+## People, Books, Exact Resources & Direct Sources Mentioned
+- A detailed list of every book, research paper, dataset, tool, person, company, or historical reference mentioned in the video, with [MM:SS] timestamps and direct Markdown reference links (e.g. Wikipedia, Google Scholar, arXiv, OpenLibrary, or official sites) so the reader can explore the exact primary resources.`;
       } else if (summaryType === 'chronological') {
         typeInstructions = `Write a natural, step-by-step walkthrough of the video from start to finish.
 Use warm, everyday human language and include [MM:SS] timestamps for every story, topic shift, and example.

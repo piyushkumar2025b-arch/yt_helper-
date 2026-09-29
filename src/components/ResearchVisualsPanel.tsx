@@ -45,15 +45,20 @@ import {
 import { APP_THEMES } from '../constants';
 import { extractSmartTermsFromSummary } from '../services/termExtractionService';
 import { extractExactVideoResources } from '../services/exactResourceExtractor';
+import {
+  createCustomExactResource,
+  deleteCustomExactResource,
+  loadLocalCustomResources,
+} from '../services/listsService';
 import { SmartImage } from './SmartImage';
-
-const CUSTOM_EXACT_RESOURCES_KEY = 'opentranscript_custom_exact_resources_v1';
 
 interface ResearchVisualsPanelProps {
   summaryMarkdown: string;
   videoTitle: string;
   videoMetadata?: VideoMetadata | null;
   transcriptSegments?: TranscriptSegment[];
+  customResources?: ExactVideoResource[];
+  onRefreshCustomResources?: (resources: ExactVideoResource[]) => void;
   onSeekToTimestamp?: (seconds: number) => void;
   onAppendWebResult: (result: WebSearchResult) => void;
   onAppendImageResult: (image: ImageSearchResult) => void;
@@ -86,6 +91,8 @@ export const ResearchVisualsPanel: React.FC<ResearchVisualsPanelProps> = ({
   videoTitle,
   videoMetadata = null,
   transcriptSegments = [],
+  customResources: externalCustomResources,
+  onRefreshCustomResources,
   onSeekToTimestamp,
   onAppendWebResult,
   onAppendImageResult,
@@ -117,15 +124,11 @@ export const ResearchVisualsPanel: React.FC<ResearchVisualsPanelProps> = ({
     | 'images'
   >('all');
 
-  // Custom user-added exact resources persisted in localStorage
-  const [customResources, setCustomResources] = useState<ExactVideoResource[]>(() => {
-    try {
-      const raw = localStorage.getItem(CUSTOM_EXACT_RESOURCES_KEY);
-      return raw ? JSON.parse(raw) : [];
-    } catch {
-      return [];
-    }
-  });
+  // Custom user-added exact resources synced with Firebase Firestore
+  const [localCustomResources, setLocalCustomResources] = useState<ExactVideoResource[]>(() =>
+    loadLocalCustomResources()
+  );
+  const customResources = externalCustomResources ?? localCustomResources;
 
   const [isAddSourceOpen, setIsAddSourceOpen] = useState(false);
   const [newSourceTitle, setNewSourceTitle] = useState('');
@@ -144,14 +147,7 @@ export const ResearchVisualsPanel: React.FC<ResearchVisualsPanelProps> = ({
     return [...customResources, ...extractedExactResources];
   }, [customResources, extractedExactResources]);
 
-  const saveCustomResources = (next: ExactVideoResource[]) => {
-    setCustomResources(next);
-    try {
-      localStorage.setItem(CUSTOM_EXACT_RESOURCES_KEY, JSON.stringify(next));
-    } catch {}
-  };
-
-  const handleAddCustomResource = (e: React.FormEvent, alsoAppendToSummary: boolean = false) => {
+  const handleAddCustomResource = async (e: React.FormEvent, alsoAppendToSummary: boolean = false) => {
     e.preventDefault();
     const cleanTitle = newSourceTitle.trim();
     if (!cleanTitle) return;
@@ -162,45 +158,30 @@ export const ResearchVisualsPanel: React.FC<ResearchVisualsPanelProps> = ({
         : `https://${rawUrl}`
       : `https://www.google.com/search?q=${encodeURIComponent(cleanTitle)}`;
 
-    let parsedSeconds: number | undefined;
     let formattedTime: string | undefined;
     if (newSourceTimestamp.trim()) {
       const parts = newSourceTimestamp.trim().replace(/[\[\]]/g, '').split(':').map(Number);
       if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
-        parsedSeconds = parts[0] * 60 + parts[1];
         formattedTime = `${String(parts[0]).padStart(2, '0')}:${String(parts[1]).padStart(2, '0')}`;
       }
     }
 
-    const created: ExactVideoResource = {
-      id: `custom-res-${Date.now()}`,
+    const created = await createCustomExactResource({
+      videoId: videoMetadata?.videoId || '',
       title: cleanTitle,
       type: newSourceType,
       description:
         newSourceDescription.trim() ||
         `User-added exact resource for "${videoTitle}".`,
       exactQuote: newSourceQuote.trim() || undefined,
-      timestampSeconds: parsedSeconds,
       formattedTime,
       primaryUrl: finalUrl,
-      primaryLabel: 'Open Exact Resource',
       authorOrCreator: newSourceAuthor.trim() || undefined,
-      verified: true,
-      secondaryLinks: [
-        {
-          label: 'Google Scholar',
-          url: `https://scholar.google.com/scholar?q=${encodeURIComponent(cleanTitle)}`,
-          sourceName: 'Google Scholar',
-        },
-        {
-          label: 'Wikipedia',
-          url: `https://en.wikipedia.org/wiki/Special:Search?search=${encodeURIComponent(cleanTitle)}`,
-          sourceName: 'Wikipedia',
-        },
-      ],
-    };
+    });
 
-    saveCustomResources([created, ...customResources]);
+    const next = [created, ...customResources.filter((r) => r.id !== created.id)];
+    setLocalCustomResources(next);
+    onRefreshCustomResources?.(next);
 
     if (alsoAppendToSummary && onAppendCustomMarkdown) {
       const md = `\n\n### [${created.title}](${created.primaryUrl}) — *${created.type}${
@@ -208,7 +189,7 @@ export const ResearchVisualsPanel: React.FC<ResearchVisualsPanelProps> = ({
       }${created.formattedTime ? ` · [${created.formattedTime}]` : ''}*\n${created.description}${
         created.exactQuote ? `\n> "${created.exactQuote}"` : ''
       }\n`;
-      onAppendCustomMarkdown(md, `Added "${created.title}" to Summary`);
+      onAppendCustomMarkdown(md, `Saved "${created.title}" to Firebase & Summary`);
       setAppendedIds((prev) => new Set(prev).add(created.id));
     }
 
@@ -221,8 +202,11 @@ export const ResearchVisualsPanel: React.FC<ResearchVisualsPanelProps> = ({
     setIsAddSourceOpen(false);
   };
 
-  const handleDeleteCustomResource = (id: string) => {
-    saveCustomResources(customResources.filter((r) => r.id !== id));
+  const handleDeleteCustomResource = async (id: string) => {
+    await deleteCustomExactResource(id);
+    const next = customResources.filter((r) => r.id !== id);
+    setLocalCustomResources(next);
+    onRefreshCustomResources?.(next);
   };
 
   const handleAppendExactResource = (res: ExactVideoResource) => {

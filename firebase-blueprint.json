@@ -110,6 +110,140 @@
         }
       },
       "required": ["listId", "ownerId", "itemType", "title", "url", "subtitle", "content", "notes", "createdAt", "updatedAt"]
+    },
+    "SavedSummary": {
+      "title": "SavedSummary",
+      "description": "A synthesized video summary document persisted in Firebase Firestore.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "description": "The Firebase Auth UID of the summary owner.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "videoId": {
+          "type": "string",
+          "description": "YouTube video ID or document identifier.",
+          "minLength": 0,
+          "maxLength": 64
+        },
+        "videoUrl": {
+          "type": "string",
+          "description": "Source video URL.",
+          "minLength": 0,
+          "maxLength": 1000
+        },
+        "videoTitle": {
+          "type": "string",
+          "description": "Title of the summarized video.",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "authorName": {
+          "type": "string",
+          "description": "Channel or speaker name.",
+          "minLength": 0,
+          "maxLength": 200
+        },
+        "summaryType": {
+          "type": "string",
+          "description": "Summary preset style.",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "markdown": {
+          "type": "string",
+          "description": "Full synthesized markdown summary with citations and notes.",
+          "minLength": 1,
+          "maxLength": 50000
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the summary was created."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the summary was last updated."
+        }
+      },
+      "required": ["ownerId", "videoId", "videoUrl", "videoTitle", "authorName", "summaryType", "markdown", "createdAt", "updatedAt"]
+    },
+    "CustomResource": {
+      "title": "CustomResource",
+      "description": "A user-added exact video resource, book, research paper, dataset, or direct citation persisted in Firebase Firestore.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "description": "The Firebase Auth UID of the resource owner.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "videoId": {
+          "type": "string",
+          "description": "Optional associated YouTube video ID.",
+          "minLength": 0,
+          "maxLength": 64
+        },
+        "title": {
+          "type": "string",
+          "description": "Title of the exact resource, book, or paper.",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "resourceType": {
+          "type": "string",
+          "description": "Classification of the exact resource.",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "description": {
+          "type": "string",
+          "description": "Explanation of how this resource relates to the video.",
+          "minLength": 0,
+          "maxLength": 2000
+        },
+        "primaryUrl": {
+          "type": "string",
+          "description": "Direct verification or reference URL.",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "authorOrCreator": {
+          "type": "string",
+          "description": "Author, researcher, or organization.",
+          "minLength": 0,
+          "maxLength": 200
+        },
+        "formattedTime": {
+          "type": "string",
+          "description": "Optional MM:SS video timestamp.",
+          "minLength": 0,
+          "maxLength": 32
+        },
+        "exactQuote": {
+          "type": "string",
+          "description": "Optional verbatim quote from the transcript.",
+          "minLength": 0,
+          "maxLength": 2000
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the resource was added."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the resource was last updated."
+        }
+      },
+      "required": ["ownerId", "videoId", "title", "resourceType", "description", "primaryUrl", "authorOrCreator", "formattedTime", "exactQuote", "createdAt", "updatedAt"]
     }
   },
   "firestore": {
@@ -120,6 +254,14 @@
     "/lists/{listId}/items/{itemId}": {
       "schema": "ListItem",
       "description": "Subcollection storing saved items belonging to a specific UserList."
+    },
+    "/summaries/{summaryId}": {
+      "schema": "SavedSummary",
+      "description": "Top-level collection storing user-saved and synced video summaries."
+    },
+    "/resources/{resourceId}": {
+      "schema": "CustomResource",
+      "description": "Top-level collection storing user-added exact video resources and primary citations."
     }
   }
 }

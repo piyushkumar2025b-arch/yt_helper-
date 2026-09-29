@@ -24,12 +24,24 @@ import {
   ArrowDownCircle,
   Plus,
   Search,
+  Sparkles,
+  Link2,
 } from 'lucide-react';
 import { speechService, SpeechItem, tokenizeSpeechWords } from '../services/speechService';
-import { SummaryResult, SummaryType, ThemeId, TypographyConfig } from '../types';
+import {
+  SummaryResult,
+  SummaryType,
+  ThemeId,
+  TypographyConfig,
+  VideoMetadata,
+  TranscriptSegment,
+  ExactVideoResource,
+} from '../types';
 import { SUMMARY_PRESETS, APP_THEMES } from '../constants';
 import { getTypographyStyles, getContentWidthClass } from './TypographySettingsModal';
 import { SmartImage } from './SmartImage';
+import { extractExactVideoResources } from '../services/exactResourceExtractor';
+import { createCustomExactResource, loadLocalCustomResources } from '../services/listsService';
 
 interface SummaryViewerProps {
   summary: SummaryResult | null;
@@ -40,6 +52,11 @@ interface SummaryViewerProps {
   onSeekToTimestamp: (seconds: number) => void;
   transcriptText?: string;
   videoTitle?: string;
+  videoMetadata?: VideoMetadata | null;
+  transcriptSegments?: TranscriptSegment[];
+  customResources?: ExactVideoResource[];
+  onRefreshCustomResources?: (resources: ExactVideoResource[]) => void;
+  onAppendCustomMarkdown?: (snippet: string, noticeLabel?: string) => void;
   openRouterKey?: string;
   selectedModelId?: string;
   currentTheme?: ThemeId;
@@ -266,6 +283,11 @@ export const SummaryViewer: React.FC<SummaryViewerProps> = ({
   onSeekToTimestamp,
   transcriptText = '',
   videoTitle = '',
+  videoMetadata = null,
+  transcriptSegments = [],
+  customResources: externalCustomResources,
+  onRefreshCustomResources,
+  onAppendCustomMarkdown,
   openRouterKey = '',
   selectedModelId = 'meta-llama/llama-3.3-70b-instruct:free',
   currentTheme = 'midnight',
@@ -297,6 +319,65 @@ export const SummaryViewer: React.FC<SummaryViewerProps> = ({
   const [translatedMarkdown, setTranslatedMarkdown] = useState<string | null>(null);
   const [isTranslating, setIsTranslating] = useState<boolean>(false);
   const [summarySearch, setSummarySearch] = useState<string>('');
+
+  // Exact Video Resources & Custom Resources state synced with Firebase
+  const [localCustomResources, setLocalCustomResources] = useState<ExactVideoResource[]>(() =>
+    loadLocalCustomResources()
+  );
+  const customResources = externalCustomResources ?? localCustomResources;
+  const [isAddResourceOpen, setIsAddResourceOpen] = useState(false);
+  const [newResTitle, setNewResTitle] = useState('');
+  const [newResUrl, setNewResUrl] = useState('');
+  const [newResType, setNewResType] = useState<ExactVideoResource['type']>('Book / Publication');
+  const [newResDesc, setNewResDesc] = useState('');
+  const [appendedResIds, setAppendedResIds] = useState<Set<string>>(new Set());
+
+  const exactResources = useMemo(() => {
+    const extracted = extractExactVideoResources(
+      videoMetadata,
+      transcriptSegments,
+      summary?.markdown || transcriptText
+    );
+    return [...customResources, ...extracted];
+  }, [videoMetadata, transcriptSegments, summary?.markdown, transcriptText, customResources]);
+
+  const handleAddCustomResourceInline = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanTitle = newResTitle.trim();
+    if (!cleanTitle) return;
+    const rawUrl = newResUrl.trim();
+    const finalUrl = rawUrl
+      ? /^https?:\/\//i.test(rawUrl)
+        ? rawUrl
+        : `https://${rawUrl}`
+      : `https://scholar.google.com/scholar?q=${encodeURIComponent(cleanTitle)}`;
+
+    const description =
+      newResDesc.trim() || `User-added exact resource for "${videoTitle || 'this video'}".`;
+
+    const created = await createCustomExactResource({
+      videoId: videoMetadata?.videoId || '',
+      title: cleanTitle,
+      type: newResType,
+      description,
+      primaryUrl: finalUrl,
+    });
+
+    const next = [created, ...customResources.filter((r) => r.id !== created.id)];
+    setLocalCustomResources(next);
+    onRefreshCustomResources?.(next);
+
+    if (onAppendCustomMarkdown) {
+      const md = `\n\n### [${created.title}](${created.primaryUrl}) — *${created.type}*\n${created.description}\n`;
+      onAppendCustomMarkdown(md, `Saved "${created.title}" to Firebase & Summary`);
+      setAppendedResIds((prev) => new Set(prev).add(created.id));
+    }
+
+    setNewResTitle('');
+    setNewResUrl('');
+    setNewResDesc('');
+    setIsAddResourceOpen(false);
+  };
 
   // Deep Dive Expansion state
   const [isExpanding, setIsExpanding] = useState(false);
@@ -943,15 +1024,32 @@ export const SummaryViewer: React.FC<SummaryViewerProps> = ({
               </button>
             )}
 
+            <button
+              type="button"
+              onClick={() => {
+                const el = document.getElementById('summary-exact-resources-section');
+                if (el) {
+                  el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                } else if (onOpenResearch) {
+                  onOpenResearch();
+                }
+              }}
+              className="flex items-center gap-1 px-1.5 py-0.5 rounded font-semibold bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 transition-colors cursor-pointer whitespace-nowrap"
+              title="Jump to Exact Video Resources, Books, Papers & Direct Sources"
+            >
+              <Sparkles className="w-3 h-3" />
+              <span>Exact Resources ({exactResources.length})</span>
+            </button>
+
             {onOpenResearch && (
               <button
                 type="button"
                 onClick={onOpenResearch}
-                className="flex items-center gap-1 px-1.5 py-0.5 rounded font-semibold bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 transition-colors cursor-pointer whitespace-nowrap"
-                title="View exact books, papers, citations, and 55+ live sources for this video"
+                className="flex items-center gap-1 px-1.5 py-0.5 rounded font-semibold bg-indigo-500/15 text-indigo-400 hover:bg-indigo-500/25 transition-colors cursor-pointer whitespace-nowrap"
+                title="Explore 55+ live research sources, academic papers, books, GitHub repos, and figures"
               >
                 <Globe className="w-3 h-3" />
-                <span>Exact Resources</span>
+                <span>55+ Sources</span>
               </button>
             )}
 
@@ -1243,6 +1341,264 @@ export const SummaryViewer: React.FC<SummaryViewerProps> = ({
                 </div>
               </div>
             ))}
+          </div>
+        )}
+
+        {/* EXACT VIDEO RESOURCES, CITATIONS & DIRECT SOURCES SECTION (Always Visible in Summary View) */}
+        {exactResources.length > 0 && (
+          <div
+            id="summary-exact-resources-section"
+            className={`mt-10 pt-6 border-t ${themeConfig.borderLight} not-prose space-y-4`}
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="space-y-0.5">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h2 className={`text-sm sm:text-base font-bold ${themeConfig.textPrimary} flex items-center gap-1.5`}>
+                    <Sparkles className="w-4 h-4 text-emerald-400" />
+                    <span>Exact Video Resources, Primary Citations &amp; Direct Sources ({exactResources.length})</span>
+                  </h2>
+                  <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/15 text-emerald-400">
+                    Verified Links
+                  </span>
+                </div>
+                <p className={`text-xs ${themeConfig.textMuted}`}>
+                  Exact books, research papers, archives, datasets, and timestamped references from this video—plus direct academic &amp; library lookup links.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => setIsAddResourceOpen((prev) => !prev)}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs font-semibold bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 cursor-pointer transition-colors"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>{isAddResourceOpen ? 'Close Form' : '+ Add Exact Resource'}</span>
+                </button>
+
+                {onAppendCustomMarkdown && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const unappended = exactResources.filter((r) => !appendedResIds.has(r.id));
+                      const listToAppend = unappended.length > 0 ? unappended : exactResources;
+                      const mdBlock =
+                        `\n\n## Verified Exact Video Resources & Primary Citations\n\n` +
+                        listToAppend
+                          .map(
+                            (r) =>
+                              `- ${r.formattedTime ? `**[${r.formattedTime}]** ` : ''}[**${r.title}**](${r.primaryUrl}) *(${r.type}${
+                                r.authorOrCreator ? ` · ${r.authorOrCreator}` : ''
+                              })* — ${r.description}`
+                          )
+                          .join('\n');
+                      onAppendCustomMarkdown(
+                        mdBlock,
+                        `Appended ${listToAppend.length} exact resources to Summary`
+                      );
+                      const nextSet = new Set(appendedResIds);
+                      listToAppend.forEach((r) => nextSet.add(r.id));
+                      setAppendedResIds(nextSet);
+                    }}
+                    className={`inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs font-semibold ${themeConfig.primaryButton} cursor-pointer transition-colors`}
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    <span>+ Insert All into Summary Notes</span>
+                  </button>
+                )}
+
+                {onOpenResearch && (
+                  <button
+                    type="button"
+                    onClick={onOpenResearch}
+                    className={`inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs font-semibold bg-indigo-500/15 text-indigo-400 hover:bg-indigo-500/25 cursor-pointer transition-colors`}
+                  >
+                    <Globe className="w-3.5 h-3.5" />
+                    <span>Open 55+ Live Research Sources →</span>
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {isAddResourceOpen && (
+              <form
+                onSubmit={handleAddCustomResourceInline}
+                className={`p-3 rounded-lg border ${themeConfig.borderLight} bg-slate-500/5 space-y-2.5 text-xs`}
+              >
+                <div className="flex items-center justify-between">
+                  <span className={`font-semibold ${themeConfig.textPrimary} flex items-center gap-1.5`}>
+                    <Link2 className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Add Custom Exact Resource or Direct Source</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setIsAddResourceOpen(false)}
+                    className={`${themeConfig.textMuted} hover:${themeConfig.textPrimary} cursor-pointer`}
+                  >
+                    Cancel
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <input
+                    type="text"
+                    required
+                    value={newResTitle}
+                    onChange={(e) => setNewResTitle(e.target.value)}
+                    placeholder="Resource Title (e.g. Book, Paper, Dataset, Repo) *"
+                    className={`px-2.5 py-1.5 rounded bg-slate-500/10 ${themeConfig.textPrimary} focus:outline-none`}
+                  />
+                  <input
+                    type="text"
+                    value={newResUrl}
+                    onChange={(e) => setNewResUrl(e.target.value)}
+                    placeholder="Direct URL (https://... or leave blank to auto-link)"
+                    className={`px-2.5 py-1.5 rounded bg-slate-500/10 ${themeConfig.textPrimary} focus:outline-none`}
+                  />
+                  <select
+                    value={newResType}
+                    onChange={(e) => setNewResType(e.target.value as ExactVideoResource['type'])}
+                    className={`px-2.5 py-1.5 rounded bg-slate-500/10 ${themeConfig.textPrimary} focus:outline-none`}
+                  >
+                    <option value="Book / Publication">Book / Publication</option>
+                    <option value="Research Paper">Research Paper</option>
+                    <option value="Tool / Framework">Tool / Code / Framework</option>
+                    <option value="Dataset / Benchmark">Dataset / Benchmark</option>
+                    <option value="Historical / Key Reference">Historical / Key Reference</option>
+                    <option value="Custom Resource">Custom Exact Resource</option>
+                  </select>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <input
+                    type="text"
+                    value={newResDesc}
+                    onChange={(e) => setNewResDesc(e.target.value)}
+                    placeholder="Description or why this resource matters..."
+                    className={`flex-1 min-w-[200px] px-2.5 py-1.5 rounded bg-slate-500/10 ${themeConfig.textPrimary} focus:outline-none`}
+                  />
+                  <button
+                    type="submit"
+                    className={`px-3 py-1.5 rounded font-semibold ${themeConfig.primaryButton} cursor-pointer`}
+                  >
+                    + Save &amp; Add to Summary
+                  </button>
+                </div>
+              </form>
+            )}
+
+            <div className={`divide-y ${themeConfig.borderLight}`}>
+              {exactResources.map((res) => {
+                const isAppended = appendedResIds.has(res.id);
+                return (
+                  <div key={res.id} className="py-3 first:pt-1 flex flex-col gap-1.5">
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div className="space-y-1 flex-1 min-w-[240px]">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-indigo-500/15 text-indigo-400">
+                            {res.type}
+                          </span>
+                          {res.formattedTime && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (res.timestampSeconds !== undefined) {
+                                  onSeekToTimestamp(res.timestampSeconds);
+                                }
+                              }}
+                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 cursor-pointer"
+                              title="Jump video to this exact moment"
+                            >
+                              <Clock className="w-2.5 h-2.5" />
+                              <span>[{res.formattedTime}]</span>
+                            </button>
+                          )}
+                          {res.authorOrCreator && (
+                            <span className={`text-[11px] font-medium ${themeConfig.textSecondary}`}>
+                              {res.authorOrCreator}
+                              {res.year ? ` (${res.year})` : ''}
+                            </span>
+                          )}
+                        </div>
+
+                        <a
+                          href={res.primaryUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className={`text-sm font-bold ${themeConfig.textPrimary} hover:text-indigo-400 transition-colors inline-flex items-center gap-1.5`}
+                        >
+                          <span>{res.title}</span>
+                          <ExternalLink className="w-3.5 h-3.5 opacity-60 shrink-0" />
+                        </a>
+                      </div>
+
+                      <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
+                        <a
+                          href={res.primaryUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 transition-colors"
+                        >
+                          <span>{res.primaryLabel}</span>
+                          <ExternalLink className="w-2.5 h-2.5" />
+                        </a>
+
+                        {onAppendCustomMarkdown && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const md = `\n\n### [${res.title}](${res.primaryUrl}) — *${res.type}${
+                                res.authorOrCreator ? ` · ${res.authorOrCreator}` : ''
+                              }${res.formattedTime ? ` · [${res.formattedTime}]` : ''}*\n${res.description}${
+                                res.exactQuote ? `\n> "${res.exactQuote}"` : ''
+                              }\n`;
+                              onAppendCustomMarkdown(md, `Added "${res.title}" to Summary`);
+                              setAppendedResIds((prev) => new Set(prev).add(res.id));
+                            }}
+                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium cursor-pointer transition-colors ${
+                              isAppended
+                                ? 'text-emerald-400 bg-emerald-500/10'
+                                : `${themeConfig.textSecondary} hover:${themeConfig.textPrimary} bg-slate-500/10 hover:bg-slate-500/20`
+                            }`}
+                          >
+                            {isAppended ? <Check className="w-2.5 h-2.5" /> : <Plus className="w-2.5 h-2.5" />}
+                            <span>{isAppended ? 'In Summary' : '+ Note'}</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    <p className={`text-xs ${themeConfig.textSecondary} leading-relaxed`}>
+                      {res.description}
+                    </p>
+
+                    {res.exactQuote && (
+                      <blockquote className={`border-l-2 border-emerald-500/50 pl-2.5 py-0.5 text-[11px] italic ${themeConfig.textMuted}`}>
+                        &ldquo;{res.exactQuote.replace(/^"+|"+$/g, '')}&rdquo;
+                      </blockquote>
+                    )}
+
+                    {res.secondaryLinks && res.secondaryLinks.length > 0 && (
+                      <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
+                        <span className={`text-[10px] uppercase tracking-wider ${themeConfig.textMuted}`}>
+                          Verify &amp; Cross-Reference:
+                        </span>
+                        {res.secondaryLinks.map((lnk, lIdx) => (
+                          <a
+                            key={lIdx}
+                            href={lnk.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] ${themeConfig.textSecondary} hover:${themeConfig.textPrimary} bg-slate-500/5 hover:bg-slate-500/15 transition-colors`}
+                          >
+                            <span>{lnk.label}</span>
+                            <ExternalLink className="w-2.5 h-2.5 opacity-60" />
+                          </a>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           </div>
         )}
       </div>

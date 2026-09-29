@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { PanelLeft, Maximize2, Minimize2, SlidersHorizontal, Tv, Palette, Check } from 'lucide-react';
+import { PanelLeft, Maximize2, Minimize2, SlidersHorizontal, Tv, Palette, Check, Cloud, LogIn, LogOut, Bookmark } from 'lucide-react';
+import { User } from 'firebase/auth';
 import { OpenRouterModel, ThemeId } from '../types';
 import { APP_THEMES } from '../constants';
 
@@ -22,6 +23,10 @@ interface HeaderProps {
   onToggleMainOptions?: () => void;
   showVideo?: boolean;
   onToggleShowVideo?: () => void;
+  user?: User | null;
+  onSignIn?: () => void;
+  onSignOut?: () => void;
+  onQuickSaveToCloud?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -37,6 +42,10 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleMainOptions,
   showVideo = false,
   onToggleShowVideo,
+  user = null,
+  onSignIn,
+  onSignOut,
+  onQuickSaveToCloud,
 }) => {
   const themeConfig = APP_THEMES[currentTheme] || APP_THEMES.midnight;
   const [isThemeMenuOpen, setIsThemeMenuOpen] = useState(false);
@@ -56,7 +65,7 @@ export const Header: React.FC<HeaderProps> = ({
     { id: 'summary', label: 'Video Summary' },
     { id: 'transcript', label: 'Transcript' },
     { id: 'knowledge', label: 'Key Ideas & Words' },
-    { id: 'research', label: 'Explore More' },
+    { id: 'research', label: 'Exact Resources & Sources' },
     { id: 'lists', label: 'My Lists' },
     { id: 'scrape', label: 'Downloads & Info' },
     { id: 'chat', label: 'Ask Anything' },
@@ -106,8 +115,58 @@ export const Header: React.FC<HeaderProps> = ({
         </nav>
       )}
 
-      {/* Zone 3: Primary View Actions (Show Video, Theme Switcher, Closable Page Controls & Fullscreen) */}
+      {/* Zone 3: Primary View Actions (Firebase Sync, Video, Theme Switcher, Toolbar & Fullscreen) */}
       <div className="flex items-center gap-1">
+        {onQuickSaveToCloud && (
+          <button
+            type="button"
+            onClick={onQuickSaveToCloud}
+            className={`flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium rounded ${themeConfig.textSecondary} hover:${themeConfig.textPrimary} hover:bg-slate-500/10 transition-colors cursor-pointer whitespace-nowrap`}
+            title="Save Current Video Summary & Exact Resources to Firebase"
+          >
+            <Bookmark className="w-3 h-3 text-indigo-400" />
+            <span className="hidden sm:inline">Save</span>
+          </button>
+        )}
+
+        {user ? (
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => onSelectTab?.('lists')}
+              className="flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium rounded bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 transition-colors cursor-pointer whitespace-nowrap"
+              title={`Connected to Firebase as ${user.email || user.displayName}`}
+            >
+              <Cloud className="w-3 h-3" />
+              <span className="hidden md:inline max-w-[110px] truncate">
+                {user.displayName?.split(' ')[0] || user.email?.split('@')[0] || 'Synced'}
+              </span>
+            </button>
+            {onSignOut && (
+              <button
+                type="button"
+                onClick={onSignOut}
+                className={`p-1 rounded ${themeConfig.textMuted} hover:${themeConfig.textPrimary} hover:bg-slate-500/10 transition-colors cursor-pointer`}
+                title="Sign Out of Firebase"
+              >
+                <LogOut className="w-3 h-3" />
+              </button>
+            )}
+          </div>
+        ) : (
+          onSignIn && (
+            <button
+              type="button"
+              onClick={onSignIn}
+              className="flex items-center gap-1 px-2 py-0.5 text-[11px] font-semibold rounded bg-indigo-500/15 text-indigo-400 hover:bg-indigo-500/25 transition-colors cursor-pointer whitespace-nowrap"
+              title="Sign in with Google to sync summaries, lists & exact resources with Firebase"
+            >
+              <LogIn className="w-3 h-3" />
+              <span>Sign In</span>
+            </button>
+          )
+        )}
+
         {onToggleShowVideo && (
           <button
             type="button"
