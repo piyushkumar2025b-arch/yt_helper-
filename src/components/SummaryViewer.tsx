@@ -27,6 +27,7 @@ import {
   Sparkles,
   Link2,
   FolderOpen,
+  Cpu,
 } from 'lucide-react';
 import { speechService, SpeechItem, tokenizeSpeechWords } from '../services/speechService';
 import {
@@ -75,6 +76,7 @@ interface SummaryViewerProps {
     notes?: string;
   }) => void;
   onOpenLists?: () => void;
+  onOpenTechWords?: () => void;
   typography?: TypographyConfig;
   isFullscreen?: boolean;
   onToggleFullscreen?: () => void;
@@ -307,6 +309,7 @@ export const SummaryViewer: React.FC<SummaryViewerProps> = ({
   onSaveToList,
   onSaveItemToList,
   onOpenLists,
+  onOpenTechWords,
   typography,
   isFullscreen = false,
   onToggleFullscreen,
@@ -455,9 +458,8 @@ export const SummaryViewer: React.FC<SummaryViewerProps> = ({
           if (wordEl) {
             const rect = wordEl.getBoundingClientRect();
             const vh = window.innerHeight;
-            const movedLine = Math.abs(rect.top - lastWordTopRef.current) > 12;
-            const outOfCenterBand = rect.top < vh * 0.24 || rect.bottom > vh * 0.72;
-            if (movedLine || outOfCenterBand) {
+            const outOfCenterBand = rect.top < vh * 0.18 || rect.bottom > vh * 0.78;
+            if (outOfCenterBand && Math.abs(rect.top - lastWordTopRef.current) > 24) {
               lastWordTopRef.current = rect.top;
               wordEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
             }
@@ -772,7 +774,7 @@ export const SummaryViewer: React.FC<SummaryViewerProps> = ({
         <React.Fragment key={wIdx}>
           <span
             ref={isCurrentWord ? activeWordRef : undefined}
-            className={`inline-block rounded transition-colors duration-75 ${
+            className={`inline-block rounded ${
               isCurrentWord
                 ? 'bg-indigo-500 text-white font-semibold px-1.5 py-0.5 shadow-sm'
                 : isPastWord
@@ -1044,6 +1046,18 @@ export const SummaryViewer: React.FC<SummaryViewerProps> = ({
               >
                 <FolderOpen className="w-3 h-3" />
                 <span>Artifacts Folder</span>
+              </button>
+            )}
+
+            {onOpenTechWords && (
+              <button
+                type="button"
+                onClick={onOpenTechWords}
+                className="flex items-center gap-1 px-1.5 py-0.5 rounded font-semibold bg-indigo-500/15 text-indigo-400 hover:bg-indigo-500/25 transition-colors cursor-pointer whitespace-nowrap"
+                title="Open Tech, AI & CSE Words Searcher + Google & Open Multi-Dictionary"
+              >
+                <Cpu className="w-3 h-3" />
+                <span>Tech, AI &amp; CSE Words</span>
               </button>
             )}
 

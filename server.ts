@@ -3806,7 +3806,7 @@ ${transcript.slice(0, 150000)}
     }
   });
 
-  // 15. GET /api/dictionary-knowledge - Live Dictionary, Phonetics, Datamuse Semantic Graph, Wikidata & Wikipedia Summary
+  // 15. GET /api/dictionary-knowledge - High-Grade Multi-Dictionary, Wiktionary, StackOverflow Tech Wiki, Datamuse Semantic Graph, Wikidata & Wikipedia Summary
   app.get('/api/dictionary-knowledge', async (req: Request, res: Response) => {
     try {
       const q = ((req.query.q as string) || '').trim();
@@ -3817,42 +3817,124 @@ ${transcript.slice(0, 150000)}
 
       let phonetic: string | undefined;
       let audioUrl: string | undefined;
-      const definitions: Array<{ partOfSpeech: string; definition: string; example?: string }> = [];
+      const definitions: Array<{ partOfSpeech: string; definition: string; example?: string; source?: string }> = [];
+      const wiktionaryDefinitions: Array<{ partOfSpeech: string; definition: string }> = [];
+      let technicalWiki: { tag: string; excerpt: string; url: string; source: string } | undefined;
+      let duckDuckGoAbstract: { heading: string; abstract: string; url: string; source: string } | undefined;
       const synonymsSet = new Set<string>();
       const relatedTerms: Array<{ word: string; score?: number; def?: string }> = [];
       let wikidata: { id: string; label: string; description: string; url: string; aliases?: string[] } | undefined;
       let wikipedia: { title: string; extract: string; url: string; thumbnailUrl?: string } | undefined;
 
       await Promise.allSettled([
-        // 1. Free Dictionary API (phonetics, audio pronunciation, definitions, synonyms)
+        // 1. Google / Free Dictionary API (phonetics, audio pronunciation, definitions, synonyms)
         (async () => {
-          const cleanWord = q.split(/\s+/)[0].replace(/[^a-zA-Z-]/g, '');
-          if (!cleanWord) return;
-          const dictUrl = `https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(cleanWord)}`;
-          const dRes = await fetch(dictUrl, { signal: AbortSignal.timeout(3500) });
-          if (dRes.ok) {
-            const dData = (await dRes.json()) as any[];
-            const entry = dData?.[0];
-            if (entry) {
-              phonetic = entry.phonetic || entry.phonetics?.find((p: any) => p.text)?.text;
-              audioUrl = entry.phonetics?.find((p: any) => p.audio)?.audio;
-              for (const meaning of entry.meanings || []) {
-                for (const s of meaning.synonyms || []) synonymsSet.add(s);
-                for (const def of (meaning.definitions || []).slice(0, 2)) {
-                  definitions.push({
-                    partOfSpeech: meaning.partOfSpeech || 'term',
-                    definition: def.definition,
-                    example: def.example,
-                  });
+          const candidates = [
+            q.trim().toLowerCase(),
+            q.split(/\s+/)[0].replace(/[^a-zA-Z-]/g, '').toLowerCase(),
+          ].filter(Boolean);
+
+          for (const candidate of Array.from(new Set(candidates))) {
+            const dictUrl = `https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(candidate)}`;
+            const dRes = await fetch(dictUrl, { signal: AbortSignal.timeout(3500) });
+            if (dRes.ok) {
+              const dData = (await dRes.json()) as any[];
+              const entry = dData?.[0];
+              if (entry) {
+                phonetic = phonetic || entry.phonetic || entry.phonetics?.find((p: any) => p.text)?.text;
+                audioUrl = audioUrl || entry.phonetics?.find((p: any) => p.audio)?.audio;
+                for (const meaning of entry.meanings || []) {
+                  for (const s of meaning.synonyms || []) synonymsSet.add(s);
+                  for (const def of (meaning.definitions || []).slice(0, 3)) {
+                    definitions.push({
+                      partOfSpeech: meaning.partOfSpeech || 'term',
+                      definition: def.definition,
+                      example: def.example,
+                      source: 'Google / Free Dictionary',
+                    });
+                  }
                 }
+                break;
               }
             }
           }
         })(),
 
-        // 2. Datamuse Lexical & Semantic Concept Graph API
+        // 2. Wiktionary Open-Source Dictionary API (multi-sense open-source definitions & computing terminology)
         (async () => {
-          const dmUrl = `https://api.datamuse.com/words?ml=${encodeURIComponent(q)}&md=dp&max=10`;
+          const candidates = [q.trim(), q.trim().toLowerCase(), q.split(/\s+/)[0].replace(/[^a-zA-Z-]/g, '').toLowerCase()].filter(Boolean);
+          for (const termCandidate of Array.from(new Set(candidates))) {
+            const wtUrl = `https://en.wiktionary.org/api/rest_v1/page/definition/${encodeURIComponent(termCandidate)}`;
+            const wtRes = await fetch(wtUrl, {
+              headers: { 'User-Agent': 'OpenTranscriptAI/1.0' },
+              signal: AbortSignal.timeout(3500),
+            });
+            if (wtRes.ok) {
+              const wtData = (await wtRes.json()) as any;
+              const enEntries = wtData?.en || [];
+              for (const section of enEntries) {
+                const pos = section.partOfSpeech || 'term';
+                for (const d of (section.definitions || []).slice(0, 3)) {
+                  const cleanDef = String(d.definition || '')
+                    .replace(/<[^>]+>/g, '')
+                    .replace(/&nbsp;/g, ' ')
+                    .replace(/&quot;/g, '"')
+                    .replace(/&#39;/g, "'")
+                    .replace(/&amp;/g, '&')
+                    .replace(/\s+/g, ' ')
+                    .trim();
+                  if (cleanDef && cleanDef.length > 8) {
+                    wiktionaryDefinitions.push({
+                      partOfSpeech: pos,
+                      definition: cleanDef,
+                    });
+                  }
+                }
+              }
+              if (wiktionaryDefinitions.length > 0) break;
+            }
+          }
+        })(),
+
+        // 3. StackOverflow / StackExchange Engineering Tag Wiki API (CSE, AI & Software Engineering definitions)
+        (async () => {
+          const tagSlug = q
+            .toLowerCase()
+            .replace(/\(.*?\)/g, '')
+            .trim()
+            .replace(/[^a-z0-9+#.-]+/g, '-')
+            .replace(/^-+|-+$/g, '');
+          if (!tagSlug) return;
+          const seKeyParam = process.env.STACKEXCHANGE_KEY
+            ? `&key=${encodeURIComponent(process.env.STACKEXCHANGE_KEY)}`
+            : '';
+          const soWikiUrl = `https://api.stackexchange.com/2.3/tags/${encodeURIComponent(tagSlug)}/wikis?site=stackoverflow${seKeyParam}`;
+          const soRes = await fetch(soWikiUrl, { signal: AbortSignal.timeout(3500) });
+          if (soRes.ok) {
+            const soData = (await soRes.json()) as any;
+            const wikiItem = soData?.items?.[0];
+            if (wikiItem && wikiItem.excerpt) {
+              const cleanExcerpt = String(wikiItem.excerpt)
+                .replace(/&quot;/g, '"')
+                .replace(/&#39;/g, "'")
+                .replace(/&amp;/g, '&')
+                .replace(/<[^>]+>/g, '')
+                .trim();
+              if (cleanExcerpt.length > 15) {
+                technicalWiki = {
+                  tag: wikiItem.tag_name || tagSlug,
+                  excerpt: cleanExcerpt,
+                  url: `https://stackoverflow.com/tags/${encodeURIComponent(wikiItem.tag_name || tagSlug)}/info`,
+                  source: 'StackOverflow Technical Tag Wiki',
+                };
+              }
+            }
+          }
+        })(),
+
+        // 4. Datamuse Lexical & Semantic Concept Graph API
+        (async () => {
+          const dmUrl = `https://api.datamuse.com/words?ml=${encodeURIComponent(q)}&md=dp&max=12`;
           const dmRes = await fetch(dmUrl, { signal: AbortSignal.timeout(3500) });
           if (dmRes.ok) {
             const dmData = (await dmRes.json()) as any[];
@@ -3868,7 +3950,7 @@ ${transcript.slice(0, 150000)}
           }
         })(),
 
-        // 3. Wikidata Knowledge Graph Entity API
+        // 5. Wikidata Knowledge Graph Entity API
         (async () => {
           const wdUrl = `https://www.wikidata.org/w/api.php?action=wbsearchentities&search=${encodeURIComponent(q)}&language=en&limit=1&format=json`;
           const wdRes = await fetch(wdUrl, {
@@ -3884,13 +3966,13 @@ ${transcript.slice(0, 150000)}
                 label: top.label || q,
                 description: top.description || 'Structured Wikidata Knowledge Graph Entity',
                 url: top.concepturi || `https://www.wikidata.org/wiki/${top.id}`,
-                aliases: Array.isArray(top.aliases) ? top.aliases.slice(0, 5) : undefined,
+                aliases: Array.isArray(top.aliases) ? top.aliases.slice(0, 6) : undefined,
               };
             }
           }
         })(),
 
-        // 4. Wikipedia REST v1 Summary API
+        // 6. Wikipedia REST v1 Summary API + Search Fallback for Technical & CSE Terms
         (async () => {
           const wikiSlug = encodeURIComponent(q.trim().replace(/\s+/g, '_'));
           const wpUrl = `https://en.wikipedia.org/api/rest_v1/page/summary/${wikiSlug}`;
@@ -3900,17 +3982,74 @@ ${transcript.slice(0, 150000)}
           });
           if (wpRes.ok) {
             const wpData = (await wpRes.json()) as any;
-            if (wpData.extract) {
+            if (wpData.extract && wpData.type !== 'disambiguation') {
               wikipedia = {
                 title: wpData.title || q,
                 extract: wpData.extract,
                 url: wpData.content_urls?.desktop?.page || `https://en.wikipedia.org/wiki/${wikiSlug}`,
                 thumbnailUrl: wpData.thumbnail?.source,
               };
+              return;
+            }
+          }
+          // Fallback: Wikipedia search API for best matching technical article
+          const searchUrl = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(q)}&utf8=&format=json&srlimit=1`;
+          const sRes = await fetch(searchUrl, {
+            headers: { 'User-Agent': 'OpenTranscriptAI/1.0' },
+            signal: AbortSignal.timeout(3500),
+          });
+          if (sRes.ok) {
+            const sData = (await sRes.json()) as any;
+            const bestTitle = sData?.query?.search?.[0]?.title;
+            if (bestTitle) {
+              const bestSlug = encodeURIComponent(String(bestTitle).replace(/\s+/g, '_'));
+              const wpRes2 = await fetch(`https://en.wikipedia.org/api/rest_v1/page/summary/${bestSlug}`, {
+                headers: { 'User-Agent': 'OpenTranscriptAI/1.0' },
+                signal: AbortSignal.timeout(3500),
+              });
+              if (wpRes2.ok) {
+                const wpData2 = (await wpRes2.json()) as any;
+                if (wpData2.extract) {
+                  wikipedia = {
+                    title: wpData2.title || bestTitle,
+                    extract: wpData2.extract,
+                    url: wpData2.content_urls?.desktop?.page || `https://en.wikipedia.org/wiki/${bestSlug}`,
+                    thumbnailUrl: wpData2.thumbnail?.source,
+                  };
+                }
+              }
+            }
+          }
+        })(),
+
+        // 7. DuckDuckGo Instant Answer Technical Abstract API
+        (async () => {
+          const ddgUrl = `https://api.duckduckgo.com/?q=${encodeURIComponent(q)}&format=json&no_html=1&skip_disambig=1`;
+          const ddgRes = await fetch(ddgUrl, { signal: AbortSignal.timeout(3500) });
+          if (ddgRes.ok) {
+            const ddgData = (await ddgRes.json()) as any;
+            if (ddgData.AbstractText && String(ddgData.AbstractText).trim().length > 20) {
+              duckDuckGoAbstract = {
+                heading: ddgData.Heading || q,
+                abstract: String(ddgData.AbstractText).trim(),
+                url: ddgData.AbstractURL || `https://duckduckgo.com/?q=${encodeURIComponent(q)}`,
+                source: ddgData.AbstractSource || 'DuckDuckGo Instant Answer',
+              };
             }
           }
         })(),
       ]);
+
+      // Merge Wiktionary definitions into main definitions if primary dictionary had none
+      if (definitions.length === 0 && wiktionaryDefinitions.length > 0) {
+        for (const wd of wiktionaryDefinitions.slice(0, 4)) {
+          definitions.push({
+            partOfSpeech: wd.partOfSpeech,
+            definition: wd.definition,
+            source: 'Wiktionary Open Dictionary',
+          });
+        }
+      }
 
       res.json({
         ok: true,
@@ -3919,7 +4058,10 @@ ${transcript.slice(0, 150000)}
           phonetic,
           audioUrl,
           definitions,
-          synonyms: Array.from(synonymsSet).slice(0, 10),
+          wiktionaryDefinitions: wiktionaryDefinitions.slice(0, 6),
+          technicalWiki,
+          duckDuckGoAbstract,
+          synonyms: Array.from(synonymsSet).slice(0, 12),
           relatedTerms,
           wikidata,
           wikipedia,

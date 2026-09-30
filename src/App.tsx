@@ -15,6 +15,7 @@ import { TypographySettingsModal, DEFAULT_TYPOGRAPHY } from './components/Typogr
 import { CrucialKnowledgePanel } from './components/CrucialKnowledgePanel';
 import { ScrapedDataViewer } from './components/ScrapedDataViewer';
 import { SavedListsPanel } from './components/SavedListsPanel';
+import { TechWordsSearcherPanel } from './components/TechWordsSearcherPanel';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { auth, signInWithGoogle, signOutUser } from './firebase';
 import {
@@ -84,7 +85,7 @@ export default function App() {
   const [summary, setSummary] = useState<SummaryResult | null>(null);
   const [activeTimestamp, setActiveTimestamp] = useState<number | null>(null);
   const [seekTrigger, setSeekTrigger] = useState<number>(0);
-  const [activeTab, setActiveTab] = useState<'summary' | 'transcript' | 'knowledge' | 'research' | 'scrape' | 'chat' | 'lists'>('summary');
+  const [activeTab, setActiveTab] = useState<'summary' | 'transcript' | 'knowledge' | 'research' | 'scrape' | 'chat' | 'lists' | 'techwords'>('summary');
   const [showVideo, setShowVideo] = useState<boolean>(false);
   const [videoSize, setVideoSize] = useState<VideoPlayerSize>(() => {
     const saved = typeof window !== 'undefined' ? localStorage.getItem('opentranscript_video_size') : null;
@@ -1057,6 +1058,7 @@ export default function App() {
                 onSaveToList={handleQuickSaveCurrentVideo}
                 onSaveItemToList={handleSaveItemToList}
                 onOpenLists={() => setActiveTab('lists')}
+                onOpenTechWords={() => setActiveTab('techwords')}
                 typography={typography}
                 isFullscreen={isFullscreen}
                 onToggleFullscreen={handleToggleFullscreen}
@@ -1160,7 +1162,21 @@ export default function App() {
                   handleFetchAndSummarize(url, savedMarkdown);
                 }}
                 onAppendToSummary={handleAppendCustomMarkdown}
+                onOpenTechWords={() => setActiveTab('techwords')}
                 user={currentUser}
+              />
+            )}
+
+            {activeTab === 'techwords' && (
+              <TechWordsSearcherPanel
+                summaryMarkdown={summary?.markdown || fullText}
+                videoTitle={metadata?.title || 'YouTube Video'}
+                transcriptSegments={segments}
+                currentTheme={theme}
+                onAppendToSummary={handleAppendCustomMarkdown}
+                onSaveToList={handleSaveItemToList}
+                onOpenArtifacts={() => setActiveTab('lists')}
+                onSeekToTimestamp={handleSeekToTimestamp}
               />
             )}
           </div>

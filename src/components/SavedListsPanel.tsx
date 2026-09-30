@@ -21,6 +21,7 @@ import {
   Search,
   X,
   Sparkles,
+  Cpu,
 } from 'lucide-react';
 import { User } from 'firebase/auth';
 import { signInWithGoogle, signOutUser } from '../firebase';
@@ -58,6 +59,7 @@ interface SavedListsPanelProps {
   onRefreshCustomResources?: (resources: ExactVideoResource[]) => void;
   onLoadSavedVideo: (url: string, savedMarkdown?: string, savedTitle?: string) => void;
   onAppendToSummary?: (markdownText: string, noticeLabel?: string) => void;
+  onOpenTechWords?: () => void;
   user: User | null;
 }
 
@@ -88,6 +90,7 @@ export const SavedListsPanel: React.FC<SavedListsPanelProps> = ({
   onRefreshCustomResources,
   onLoadSavedVideo,
   onAppendToSummary,
+  onOpenTechWords,
   user,
 }) => {
   const themeConfig = APP_THEMES[currentTheme] || APP_THEMES.midnight;
@@ -604,8 +607,20 @@ export const SavedListsPanel: React.FC<SavedListsPanelProps> = ({
             </button>
           </div>
 
-          {/* 1-Click Save Actions for Current Video, Exact Sources & Custom Artifact */}
+          {/* 1-Click Save Actions for Current Video, Exact Sources, Custom Artifact & Tech Words Searcher */}
           <div className="flex items-center gap-1.5 flex-wrap">
+            {onOpenTechWords && (
+              <button
+                type="button"
+                onClick={onOpenTechWords}
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs font-semibold bg-indigo-500/15 text-indigo-400 hover:bg-indigo-500/25 cursor-pointer transition-colors"
+                title="Open Tech, AI & CSE Words Searcher + Multi-Dictionary"
+              >
+                <Cpu className="w-3.5 h-3.5" />
+                <span>Tech, AI &amp; CSE Words Searcher</span>
+              </button>
+            )}
+
             <button
               type="button"
               onClick={() => setIsAddingCustomItem(!isAddingCustomItem)}

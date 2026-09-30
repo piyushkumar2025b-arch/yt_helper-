@@ -107,9 +107,8 @@ export const TranscriptViewer: React.FC<TranscriptViewerProps> = ({
           if (wordEl) {
             const rect = wordEl.getBoundingClientRect();
             const vh = window.innerHeight;
-            const movedLine = Math.abs(rect.top - lastWordTopRef.current) > 12;
-            const outOfCenterBand = rect.top < vh * 0.24 || rect.bottom > vh * 0.72;
-            if (movedLine || outOfCenterBand) {
+            const outOfCenterBand = rect.top < vh * 0.18 || rect.bottom > vh * 0.78;
+            if (outOfCenterBand && Math.abs(rect.top - lastWordTopRef.current) > 24) {
               lastWordTopRef.current = rect.top;
               wordEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
             }
@@ -310,9 +309,9 @@ export const TranscriptViewer: React.FC<TranscriptViewerProps> = ({
         <React.Fragment key={wIdx}>
           <span
             ref={isCurrentWord ? activeWordRef : undefined}
-            className={`inline-block rounded transition-all duration-100 ${
+            className={`inline-block rounded ${
               isCurrentWord
-                ? 'bg-indigo-500 text-white font-semibold px-1.5 py-0.5 shadow-sm scale-[1.02]'
+                ? 'bg-indigo-500 text-white font-semibold px-1.5 py-0.5 shadow-sm'
                 : isPastWord
                 ? `${themeConfig.textPrimary} font-medium`
                 : `${themeConfig.textSecondary}`

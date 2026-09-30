@@ -20,6 +20,7 @@ import {
   Search,
   Bookmark,
   FolderOpen,
+  Cpu,
   Cloud,
   LogIn,
   LogOut,
@@ -62,8 +63,8 @@ interface SidebarMenuProps {
   onChangeVideoSize?: (size: VideoPlayerSize) => void;
   videoPlacement?: VideoPlacementMode;
   onChangeVideoPlacement?: (mode: VideoPlacementMode) => void;
-  activeTab: 'summary' | 'transcript' | 'knowledge' | 'research' | 'scrape' | 'chat' | 'lists';
-  onSelectTab: (tab: 'summary' | 'transcript' | 'knowledge' | 'research' | 'scrape' | 'chat' | 'lists') => void;
+  activeTab: 'summary' | 'transcript' | 'knowledge' | 'research' | 'scrape' | 'chat' | 'lists' | 'techwords';
+  onSelectTab: (tab: 'summary' | 'transcript' | 'knowledge' | 'research' | 'scrape' | 'chat' | 'lists' | 'techwords') => void;
   summaryType: SummaryType;
   onChangeSummaryType: (type: SummaryType) => void;
   detailLevel: DetailLevel;
@@ -253,6 +254,7 @@ export const SidebarMenu: React.FC<SidebarMenuProps> = ({
     { id: 'knowledge', label: 'Key Ideas & Words', icon: BookOpen },
     { id: 'research', label: 'Exact Resources & Sources', icon: Globe },
     { id: 'lists', label: 'Artifacts Folder', icon: FolderOpen },
+    { id: 'techwords', label: 'Tech, AI & CSE Words', icon: Cpu },
     { id: 'scrape', label: 'Downloads & Info', icon: Database },
     { id: 'chat', label: 'Ask Anything', icon: MessageSquare },
   ] as const;

@@ -233,6 +233,7 @@ export const STUDIO_CLOUD_VOICES: VoiceOption[] = [
 
 export function tokenizeSpeechWords(text: string): string[] {
   return text
+    .replace(/([a-zA-Z0-9)'"%])([—–])([a-zA-Z0-9('"$$])/g, '$1$2 $3')
     .replace(/\s+/g, ' ')
     .trim()
     .split(' ')
@@ -250,18 +251,18 @@ function getWordPhoneticProfile(rawWord: string): {
 
   if (/[.!?]+['"”’)\]]*$/.test(trimmed)) {
     pauseType = 'strong';
-    pauseWeight = 3.4;
+    pauseWeight = 2.6;
   } else if (/[:;—–]+['"”’)\]]*$/.test(trimmed)) {
     pauseType = 'strong';
-    pauseWeight = 2.6;
+    pauseWeight = 1.9;
   } else if (/[,)\]]+['"”’]*$/.test(trimmed)) {
     pauseType = 'medium';
-    pauseWeight = 1.6;
+    pauseWeight = 1.1;
   }
 
   const core = trimmed.replace(/^[^a-zA-Z0-9$%]+|[^a-zA-Z0-9%]+$/g, '');
   if (!core) {
-    return { spokenWeight: 0.5, pauseWeight, pauseType };
+    return { spokenWeight: 0.35, pauseWeight, pauseType };
   }
 
   let syllables = 0;
@@ -270,20 +271,20 @@ function getWordPhoneticProfile(rawWord: string): {
   if (digitMatches) {
     for (const d of digitMatches) {
       if (d.length === 4 && (d.startsWith('19') || d.startsWith('20'))) {
-        syllables += 4.2;
+        syllables += 3.8;
       } else {
-        syllables += Math.max(1.5, d.length * 1.45);
+        syllables += Math.max(1.3, d.length * 1.35);
       }
     }
   }
 
-  if (core.includes('%')) syllables += 2.0;
-  if (core.includes('$')) syllables += 1.8;
+  if (core.includes('%')) syllables += 1.8;
+  if (core.includes('$')) syllables += 1.6;
 
   const alpha = core.replace(/[^a-zA-Z]/g, '');
   if (alpha.length > 0) {
     if (alpha.length >= 2 && alpha.length <= 5 && alpha === alpha.toUpperCase() && !/^[AEIOU]+$/.test(alpha)) {
-      syllables += alpha.length * 1.15;
+      syllables += alpha.length * 1.1;
     } else {
       const lower = alpha.toLowerCase();
       const withoutSilentE = lower.length > 3 ? lower.replace(/e$/, '') : lower;
@@ -294,10 +295,12 @@ function getWordPhoneticProfile(rawWord: string): {
   }
 
   const lowerCore = core.toLowerCase();
-  const isFastFunctionWord = /^(a|an|the|to|of|in|on|at|by|for|is|be|as|or|if|it)$/.test(lowerCore);
+  const isFastFunctionWord = /^(a|an|the|to|of|in|on|at|by|for|is|be|as|or|if|it|he|we|so|up|no|do|my|me|us)$/.test(
+    lowerCore
+  );
   const baseWeight = isFastFunctionWord
-    ? 0.65
-    : Math.max(0.85, syllables * 0.72 + Math.min(8, core.length) * 0.09);
+    ? 0.52
+    : Math.max(0.78, syllables * 0.68 + Math.min(8, core.length) * 0.075);
 
   return {
     spokenWeight: baseWeight,
@@ -307,12 +310,14 @@ function getWordPhoneticProfile(rawWord: string): {
 }
 
 function normTokenForSync(s: string): string {
-  return s.replace(/[^a-zA-Z0-9&%$]/g, '').toLowerCase();
+  return s.replace(/[^a-zA-Z0-9&%$+]/g, '').toLowerCase();
 }
 
 /**
- * Aligns UI whitespace-separated words (`uiWords`) with hardware `WordBoundary` events emitted by the neural TTS engine.
- * Handles multi-word subtitle phrases (e.g. "in 2005"), compound slash/hyphen tokens (e.g. "AI/ML"), and standalone punctuation ("—").
+ * Aligns UI tokens (`uiWords`) with hardware `WordBoundary` events emitted by the neural TTS engine.
+ * Uses a two-stage Global Anchor + Local Phonetic Interpolation algorithm so any multi-word phrase,
+ * number, symbol, or compound token is strictly bounded by surrounding exact word anchors and can
+ * never cause cumulative drift.
  */
 function alignUiWordsToNeuralBoundaries(
   uiWords: string[],
@@ -320,20 +325,20 @@ function alignUiWordsToNeuralBoundaries(
 ): WordTiming[] {
   if (uiWords.length === 0) return [];
 
-  // 1. Expand any multi-word boundary item (e.g. "in 2005") into per-word items weighted by phonetic length
+  // 1. Expand multi-word or dash/slash-connected boundary items into individual sub-tokens weighted by phonetic length
   const expandedSubs: Array<{ startSec: number; endSec: number; text: string; norm: string }> = [];
   for (const b of rawBoundaries) {
     const startSec = Math.max(0, Number(b.startSec) || 0);
-    const endSec = Math.max(startSec + 0.01, Number(b.endSec) || startSec + 0.08);
-    const parts = String(b.text || '')
-      .trim()
-      .split(/\s+/)
-      .filter(Boolean);
+    const endSec = Math.max(startSec + 0.01, Number(b.endSec) || startSec + 0.07);
+    const rawStr = String(b.text || '')
+      .replace(/([a-zA-Z0-9])([—–/→])([a-zA-Z0-9])/g, '$1 $3')
+      .trim();
+    const parts = rawStr.split(/\s+/).filter(Boolean);
 
     if (parts.length <= 1) {
-      const n = normTokenForSync(b.text || '');
+      const n = normTokenForSync(rawStr);
       if (n) {
-        expandedSubs.push({ startSec, endSec, text: b.text, norm: n });
+        expandedSubs.push({ startSec, endSec, text: rawStr, norm: n });
       }
     } else {
       const weights = parts.map((p) => getWordPhoneticProfile(p).spokenWeight);
@@ -352,32 +357,18 @@ function alignUiWordsToNeuralBoundaries(
 
   if (expandedSubs.length === 0) return [];
 
-  // 2. Map every UI word token to its exact neural boundary interval
+  // 2. Discover monotonically increasing anchor pairs (uiIndex -> [subStartIdx, subEndIdx])
+  const anchors: Array<{ uiIdx: number; startSec: number; endSec: number }> = [];
   let subPtr = 0;
-  const aligned: WordTiming[] = [];
 
-  for (let i = 0; i < uiWords.length; i++) {
-    const w = uiWords[i];
-    const uNorm = normTokenForSync(w);
+  for (let i = 0; i < uiWords.length && subPtr < expandedSubs.length; i++) {
+    const uNorm = normTokenForSync(uiWords[i]);
+    if (!uNorm) continue;
 
-    // Standalone punctuation token (e.g. "—", "-", "•")
-    if (!uNorm) {
-      const prevEnd = aligned.length > 0 ? aligned[aligned.length - 1].endSec : 0;
-      const nextStart = subPtr < expandedSubs.length ? expandedSubs[subPtr].startSec : prevEnd + 0.08;
-      aligned.push({
-        word: w,
-        wordIndex: i,
-        startSec: prevEnd,
-        endSec: Math.max(prevEnd, nextStart),
-      });
-      continue;
-    }
-
-    // Direct 1-to-1 match
-    if (subPtr < expandedSubs.length && expandedSubs[subPtr].norm === uNorm) {
-      aligned.push({
-        word: w,
-        wordIndex: i,
+    // Case A: Exact 1-to-1 match at subPtr
+    if (expandedSubs[subPtr].norm === uNorm) {
+      anchors.push({
+        uiIdx: i,
         startSec: expandedSubs[subPtr].startSec,
         endSec: expandedSubs[subPtr].endSec,
       });
@@ -385,85 +376,116 @@ function alignUiWordsToNeuralBoundaries(
       continue;
     }
 
-    // Compound UI token split across multiple neural boundaries (e.g. "AI/ML" -> "ai" + "ml")
-    if (subPtr < expandedSubs.length && uNorm.startsWith(expandedSubs[subPtr].norm)) {
+    // Case B: UI token is a compound of 2..4 consecutive expandedSubs tokens (e.g. "AI/ML" -> "ai" + "ml")
+    if (uNorm.startsWith(expandedSubs[subPtr].norm)) {
       let concat = '';
       const startS = expandedSubs[subPtr].startSec;
       let endS = expandedSubs[subPtr].endSec;
       let k = subPtr;
-      while (k < expandedSubs.length && (concat + expandedSubs[k].norm).length <= uNorm.length + 2) {
+      let matchedCompound = false;
+      while (k < expandedSubs.length && k - subPtr < 5 && (concat + expandedSubs[k].norm).length <= uNorm.length + 2) {
         concat += expandedSubs[k].norm;
         endS = expandedSubs[k].endSec;
         k++;
-        if (concat === uNorm) break;
+        if (concat === uNorm) {
+          matchedCompound = true;
+          break;
+        }
       }
-      subPtr = k;
-      aligned.push({
-        word: w,
-        wordIndex: i,
-        startSec: startS,
-        endSec: endS,
-      });
-      continue;
-    }
-
-    // Lookahead up to 5 tokens in expandedSubs to re-anchor if any symbol was skipped/expanded
-    let foundIdx = -1;
-    for (let look = 1; look <= 5 && subPtr + look < expandedSubs.length; look++) {
-      if (expandedSubs[subPtr + look].norm === uNorm) {
-        foundIdx = subPtr + look;
-        break;
+      if (matchedCompound) {
+        anchors.push({ uiIdx: i, startSec: startS, endSec: endS });
+        subPtr = k;
+        continue;
       }
     }
-    if (foundIdx !== -1) {
-      aligned.push({
-        word: w,
-        wordIndex: i,
-        startSec: expandedSubs[foundIdx].startSec,
-        endSec: expandedSubs[foundIdx].endSec,
-      });
-      subPtr = foundIdx + 1;
-      continue;
+
+    // Case C: Lookahead in expandedSubs (1..6) and uiWords (0..3) for the nearest exact synchronization anchor
+    let bestSubLook = -1;
+    let bestUiLook = -1;
+    let bestDist = 999;
+
+    for (let uLook = 0; uLook <= 3 && i + uLook < uiWords.length; uLook++) {
+      const candidateUNorm = normTokenForSync(uiWords[i + uLook]);
+      if (!candidateUNorm) continue;
+      for (let sLook = 0; sLook <= 6 && subPtr + sLook < expandedSubs.length; sLook++) {
+        if (expandedSubs[subPtr + sLook].norm === candidateUNorm) {
+          const dist = uLook + sLook;
+          if (dist < bestDist) {
+            bestDist = dist;
+            bestUiLook = uLook;
+            bestSubLook = sLook;
+          }
+          break;
+        }
+      }
+      if (bestDist <= 1) break;
     }
 
-    // Lookahead in uiWords (in case a UI token was silent and next UI word matches current subPtr)
-    if (
-      i + 1 < uiWords.length &&
-      subPtr < expandedSubs.length &&
-      normTokenForSync(uiWords[i + 1]) === expandedSubs[subPtr].norm
-    ) {
-      const prevEnd = aligned.length > 0 ? aligned[aligned.length - 1].endSec : 0;
-      const nextStart = expandedSubs[subPtr].startSec;
-      aligned.push({
-        word: w,
-        wordIndex: i,
-        startSec: prevEnd,
-        endSec: Math.max(prevEnd, nextStart),
+    if (bestSubLook !== -1 && bestUiLook === 0) {
+      const targetSub = subPtr + bestSubLook;
+      anchors.push({
+        uiIdx: i,
+        startSec: expandedSubs[targetSub].startSec,
+        endSec: expandedSubs[targetSub].endSec,
       });
+      subPtr = targetSub + 1;
+    } else if (bestSubLook === 0 && bestUiLook > 0) {
+      // Current subPtr matches a future UI word (i + bestUiLook); leave UI word i unanchored so it interpolates cleanly
       continue;
-    }
-
-    // Fallback 1-to-1 step
-    if (subPtr < expandedSubs.length) {
-      aligned.push({
-        word: w,
-        wordIndex: i,
+    } else if (bestSubLook === -1) {
+      // Neither matched nearby; pair 1-to-1 so pointer advances steadily
+      anchors.push({
+        uiIdx: i,
         startSec: expandedSubs[subPtr].startSec,
         endSec: expandedSubs[subPtr].endSec,
       });
       subPtr++;
-    } else {
-      const prevEnd = aligned.length > 0 ? aligned[aligned.length - 1].endSec : 0;
-      aligned.push({
-        word: w,
-        wordIndex: i,
-        startSec: prevEnd,
-        endSec: prevEnd + 0.12,
-      });
     }
   }
 
-  return aligned;
+  // 3. Build complete WordTiming[] for all uiWords, interpolating any unanchored tokens between anchors
+  const result: WordTiming[] = new Array(uiWords.length);
+  for (const a of anchors) {
+    result[a.uiIdx] = {
+      word: uiWords[a.uiIdx],
+      wordIndex: a.uiIdx,
+      startSec: a.startSec,
+      endSec: a.endSec,
+    };
+  }
+
+  const totalEndSec = expandedSubs[expandedSubs.length - 1].endSec;
+  let idx = 0;
+  while (idx < uiWords.length) {
+    if (result[idx]) {
+      idx++;
+      continue;
+    }
+    const gapStartIdx = idx;
+    while (idx < uiWords.length && !result[idx]) {
+      idx++;
+    }
+    const gapEndIdx = idx - 1; // inclusive
+    const prevStartSec = gapStartIdx > 0 && result[gapStartIdx - 1] ? result[gapStartIdx - 1].endSec : expandedSubs[0].startSec;
+    const nextEndSec =
+      idx < uiWords.length && result[idx]
+        ? Math.max(prevStartSec + 0.02, result[idx].startSec)
+        : Math.max(prevStartSec + 0.06 * (gapEndIdx - gapStartIdx + 1), totalEndSec);
+
+    const count = gapEndIdx - gapStartIdx + 1;
+    const step = (nextEndSec - prevStartSec) / count;
+    for (let k = 0; k < count; k++) {
+      const wIdx = gapStartIdx + k;
+      result[wIdx] = {
+        word: uiWords[wIdx],
+        wordIndex: wIdx,
+        startSec: prevStartSec + k * step,
+        endSec: prevStartSec + (k + 1) * step,
+      };
+    }
+  }
+
+  return result;
 }
 
 function base64ToArrayBuffer(base64: string): ArrayBuffer {
@@ -551,7 +573,7 @@ function alignWordsToSamples(
     if (val > peakRms) peakRms = val;
   }
 
-  const silenceThreshold = Math.max(0.006, peakRms * 0.06);
+  const silenceThreshold = Math.max(0.006, peakRms * 0.065);
 
   let firstActiveFrame = 0;
   for (let f = 0; f < numFrames - 2; f++) {
@@ -576,20 +598,24 @@ function alignWordsToSamples(
 
   const profiles = words.map(getWordPhoneticProfile);
   const spanLen = Math.max(1, lastActiveFrame - firstActiveFrame + 1);
-  const cumEnergy = new Float32Array(spanLen);
-  let energySum = 0;
+  const cumProgress = new Float32Array(spanLen);
+  let progressSum = 0;
+
+  // Weight active speech frames uniformly by energy and silence frames lightly so pauses do not steal speech time
   for (let i = 0; i < spanLen; i++) {
     const f = firstActiveFrame + i;
-    const e = rms[f] > silenceThreshold ? Math.pow(rms[f], 0.4) + 0.22 : 0.08;
-    energySum += e;
-    cumEnergy[i] = energySum;
+    const isVoiced = rms[f] > silenceThreshold;
+    const step = isVoiced ? 0.65 + Math.pow(rms[f] / Math.max(0.01, peakRms), 0.35) * 0.55 : 0.22;
+    progressSum += step;
+    cumProgress[i] = progressSum;
   }
-  if (energySum <= 0) energySum = 1;
+  if (progressSum <= 0) progressSum = 1;
 
   let totalWeight = 0;
   const weights: number[] = [];
   for (let i = 0; i < words.length; i++) {
-    const w = profiles[i].spokenWeight + (i < words.length - 1 ? profiles[i].pauseWeight * 0.45 : 0);
+    // Keep pause weight modest (0.18x) because silence frames already have reduced step density (0.22)
+    const w = profiles[i].spokenWeight + (i < words.length - 1 ? profiles[i].pauseWeight * 0.18 : 0);
     weights.push(w);
     totalWeight += w;
   }
@@ -602,12 +628,12 @@ function alignWordsToSamples(
   for (let i = 0; i < words.length; i++) {
     runningW += weights[i];
     const ratio = i === words.length - 1 ? 1.0 : runningW / totalWeight;
-    const targetE = ratio * energySum;
+    const targetP = ratio * progressSum;
     let lo = 0;
     let hi = spanLen - 1;
     while (lo < hi) {
       const mid = (lo + hi) >> 1;
-      if (cumEnergy[mid] < targetE) lo = mid + 1;
+      if (cumProgress[mid] < targetP) lo = mid + 1;
       else hi = mid;
     }
     const endSec = Math.max(prevEndSec + 0.015, timeOffsetSec + (firstActiveFrame + lo) * frameSec);
@@ -668,9 +694,12 @@ class SpeechService {
         this.initVoices();
       }
 
-      const savedVoice = localStorage.getItem('open_transcript_voice');
+      const savedVoice = localStorage.getItem('open_transcript_studio_voice_v3');
       if (savedVoice) {
         this.selectedVoiceURI = savedVoice;
+      } else {
+        this.selectedVoiceURI = STUDIO_CLOUD_VOICES[0].voiceURI;
+        localStorage.setItem('open_transcript_studio_voice_v3', this.selectedVoiceURI);
       }
 
       const savedRate = localStorage.getItem('open_transcript_rate');
@@ -762,7 +791,7 @@ class SpeechService {
   public setSelectedVoiceURI(uri: string) {
     this.selectedVoiceURI = uri;
     if (typeof window !== 'undefined') {
-      localStorage.setItem('open_transcript_voice', uri);
+      localStorage.setItem('open_transcript_studio_voice_v3', uri);
     }
     if (this.isPlaying && !this.isPaused && this.currentIndex >= 0) {
       this.playCurrent();
@@ -899,11 +928,35 @@ class SpeechService {
   }
 
   /**
+   * Maps any selected voice (including legacy/system voices) to its Studio Cloud voice identifier
+   * so /api/tts can synthesize it with exact hardware WordBoundary timestamps.
+   */
+  private resolveCloudVoiceURI(voice: VoiceOption): string {
+    if (voice.isStudioCloud) return voice.voiceURI;
+    const lower = `${voice.name} ${voice.voiceURI} ${voice.lang}`.toLowerCase();
+    if (lower.includes('gb') || lower.includes('uk') || lower.includes('british') || lower.includes('daniel')) {
+      return lower.includes('male') || lower.includes('daniel') || lower.includes('arthur')
+        ? 'studio:gemini:Charon'
+        : 'studio:gcloud:en-GB-Neural2-A';
+    }
+    if (lower.includes('au') || lower.includes('australian') || lower.includes('karen')) {
+      return 'studio:gcloud:en-AU-Natasha';
+    }
+    if (lower.includes('in') || lower.includes('indian') || lower.includes('rishi')) {
+      return 'studio:gcloud:en-IN-Neural2-A';
+    }
+    if (lower.includes('male') || lower.includes('david') || lower.includes('mark') || lower.includes('alex')) {
+      return 'studio:gemini:Puck';
+    }
+    return 'studio:gemini:Kore';
+  }
+
+  /**
    * Fetches neural audio + hardware WordBoundary timestamps from /api/tts,
    * aligns every UI word token to its exact millisecond interval, and prepares a playable Blob URL.
    */
   private prepareCloudAudio(text: string, voiceURI: string, lang: string): Promise<PreparedCloudAudio | null> {
-    const cacheKey = `${voiceURI}:${text.slice(0, 350)}:${text.length}`;
+    const cacheKey = `${voiceURI}:${lang}:${text.slice(0, 350)}:${text.length}`;
     if (this.preparedAudioCache.has(cacheKey)) {
       return this.preparedAudioCache.get(cacheKey)!;
     }
@@ -932,8 +985,6 @@ class SpeechService {
         if (Array.isArray(data.wordBoundaries) && data.wordBoundaries.length > 0) {
           const exactTimings = alignUiWordsToNeuralBoundaries(words, data.wordBoundaries);
           if (exactTimings.length > 0) {
-            // Convert to uncompressed WAV if AudioContext is available for zero-latency sample clock,
-            // otherwise use direct MP3 Blob URL (both share the exact same 0.000s timeline).
             let audioBlobUrl = '';
             let durationSec = exactTimings[exactTimings.length - 1].endSec;
             if (ctx) {
@@ -1032,14 +1083,15 @@ class SpeechService {
   }
 
   private prefetchNextItems(startIndex: number) {
-    const selectedVoice = this.voices.find((v) => v.voiceURI === this.selectedVoiceURI);
-    if (!selectedVoice?.isStudioCloud) return;
+    const selectedVoice =
+      this.voices.find((v) => v.voiceURI === this.selectedVoiceURI) || STUDIO_CLOUD_VOICES[0];
+    const cloudVoiceURI = this.resolveCloudVoiceURI(selectedVoice);
     for (let offset = 1; offset <= 2; offset++) {
       const idx = startIndex + offset;
       if (idx >= 0 && idx < this.items.length) {
         const nextText = this.items[idx]?.text?.trim();
         if (nextText) {
-          this.prepareCloudAudio(nextText, selectedVoice.voiceURI, selectedVoice.lang).catch(() => {});
+          this.prepareCloudAudio(nextText, cloudVoiceURI, selectedVoice.lang).catch(() => {});
         }
       }
     }
@@ -1091,119 +1143,120 @@ class SpeechService {
 
     const selectedVoice =
       this.voices.find((v) => v.voiceURI === this.selectedVoiceURI) || STUDIO_CLOUD_VOICES[0];
+    const cloudVoiceURI = this.resolveCloudVoiceURI(selectedVoice);
 
-    // Path A: Studio Neural Cloud Voice with Exact Hardware WordBoundary Sync
-    if (selectedVoice?.isStudioCloud) {
-      const prepared = await this.prepareCloudAudio(
-        textToSpeak,
-        selectedVoice.voiceURI,
-        selectedVoice.lang
-      );
+    // Path A: Always prefer Studio Neural Cloud Voice with Exact Hardware WordBoundary Sync
+    const prepared = await this.prepareCloudAudio(
+      textToSpeak,
+      cloudVoiceURI,
+      selectedVoice.lang
+    );
 
-      if (sessionId !== this.playbackSessionId || !this.isPlaying) return;
+    if (sessionId !== this.playbackSessionId || !this.isPlaying) return;
 
-      if (prepared && prepared.wordTimings.length > 0) {
-        this.currentWordTimings = prepared.wordTimings;
-        const audio = new Audio(prepared.audioBlobUrl);
-        (audio as any).preservesPitch = true;
-        audio.playbackRate = this.rate;
-        this.currentAudio = audio;
+    if (prepared && prepared.wordTimings.length > 0) {
+      this.currentWordTimings = prepared.wordTimings;
+      const audio = new Audio(prepared.audioBlobUrl);
+      (audio as any).preservesPitch = true;
+      audio.playbackRate = this.rate;
+      this.currentAudio = audio;
 
-        let lastMediaTime = 0;
-        let lastPerfTime = performance.now();
+      let lastMediaTime = 0;
+      let lastPerfTime = performance.now();
 
-        const syncLoop = () => {
-          if (sessionId !== this.playbackSessionId || !this.isPlaying) return;
+      const syncLoop = () => {
+        if (sessionId !== this.playbackSessionId || !this.isPlaying) return;
 
-          if (this.currentAudio && !this.isPaused && !this.currentAudio.paused) {
-            const rawMediaTime = this.currentAudio.currentTime;
-            const now = performance.now();
-            if (rawMediaTime !== lastMediaTime) {
-              lastMediaTime = rawMediaTime;
-              lastPerfTime = now;
-            }
-
-            // Do not advance past 0.000s before the OS audio output clock actually starts moving
-            const subFrameDelta =
-              rawMediaTime > 0
-                ? Math.min(0.022, ((now - lastPerfTime) / 1000) * this.currentAudio.playbackRate)
-                : 0;
-            // Add 20ms visual paint lead compensation so highlight lands at the exact phoneme onset
-            const lookupSec = rawMediaTime > 0 ? rawMediaTime + subFrameDelta + 0.02 : 0;
-
-            const timings = this.currentWordTimings;
-            if (timings.length > 0) {
-              let lo = 0;
-              let hi = timings.length - 1;
-              let matchedIdx = 0;
-              while (lo <= hi) {
-                const mid = (lo + hi) >> 1;
-                if (timings[mid].startSec <= lookupSec) {
-                  matchedIdx = mid;
-                  lo = mid + 1;
-                } else {
-                  hi = mid - 1;
-                }
-              }
-              if (matchedIdx !== this.currentWordIndex) {
-                this.notifyWord(matchedIdx);
-              }
-            }
+        if (this.currentAudio && !this.isPaused && !this.currentAudio.paused) {
+          const rawMediaTime = this.currentAudio.currentTime;
+          const now = performance.now();
+          if (rawMediaTime !== lastMediaTime) {
+            lastMediaTime = rawMediaTime;
+            lastPerfTime = now;
           }
 
-          this.rafId = window.requestAnimationFrame(syncLoop);
-        };
+          const rate = this.currentAudio.playbackRate || 1.0;
+          // Interpolate between audio clock ticks at 60fps
+          const subFrameDelta =
+            rawMediaTime > 0
+              ? Math.min(0.025, ((now - lastPerfTime) / 1000) * rate)
+              : 0;
+          // 85ms phoneme-onset & React render lead compensation so the blue highlight lands at the exact spoken syllable onset
+          const leadCompSec = 0.085 * rate;
+          const lookupSec = rawMediaTime > 0 ? rawMediaTime + subFrameDelta + leadCompSec : 0;
 
-        audio.onplay = () => {
-          if (sessionId !== this.playbackSessionId) return;
-          lastMediaTime = audio.currentTime;
-          lastPerfTime = performance.now();
+          const timings = this.currentWordTimings;
+          if (timings.length > 0) {
+            let lo = 0;
+            let hi = timings.length - 1;
+            let matchedIdx = 0;
+            while (lo <= hi) {
+              const mid = (lo + hi) >> 1;
+              if (timings[mid].startSec <= lookupSec) {
+                matchedIdx = mid;
+                lo = mid + 1;
+              } else {
+                hi = mid - 1;
+              }
+            }
+            if (matchedIdx !== this.currentWordIndex) {
+              this.notifyWord(matchedIdx);
+            }
+          }
+        }
+
+        this.rafId = window.requestAnimationFrame(syncLoop);
+      };
+
+      audio.onplay = () => {
+        if (sessionId !== this.playbackSessionId) return;
+        lastMediaTime = audio.currentTime;
+        lastPerfTime = performance.now();
+        this.notifyState();
+        this.itemStartListeners.forEach((l) => l(this.currentIndex, currentItem));
+        this.notifyWord(0);
+        this.cancelSyncLoop();
+        this.rafId = window.requestAnimationFrame(syncLoop);
+      };
+
+      audio.onended = () => {
+        if (sessionId !== this.playbackSessionId) return;
+        this.cancelSyncLoop();
+        if (this.currentWords.length > 0) {
+          this.notifyWord(this.currentWords.length - 1);
+        }
+        if (this.isPlaying && !this.isPaused) {
+          if (this.currentIndex + 1 < this.items.length) {
+            this.currentIndex++;
+            this.playCurrent();
+          } else {
+            this.stop();
+          }
+        }
+      };
+
+      audio.onerror = () => {
+        if (sessionId !== this.playbackSessionId) return;
+        this.cancelSyncLoop();
+        this.playWithBrowserSynth(textToSpeak, currentItem, selectedVoice, sessionId);
+      };
+
+      try {
+        if (!this.isPaused) {
+          await audio.play();
+        } else {
           this.notifyState();
           this.itemStartListeners.forEach((l) => l(this.currentIndex, currentItem));
           this.notifyWord(0);
-          this.cancelSyncLoop();
-          this.rafId = window.requestAnimationFrame(syncLoop);
-        };
-
-        audio.onended = () => {
-          if (sessionId !== this.playbackSessionId) return;
-          this.cancelSyncLoop();
-          if (this.currentWords.length > 0) {
-            this.notifyWord(this.currentWords.length - 1);
-          }
-          if (this.isPlaying && !this.isPaused) {
-            if (this.currentIndex + 1 < this.items.length) {
-              this.currentIndex++;
-              this.playCurrent();
-            } else {
-              this.stop();
-            }
-          }
-        };
-
-        audio.onerror = () => {
-          if (sessionId !== this.playbackSessionId) return;
-          this.cancelSyncLoop();
-          this.playWithBrowserSynth(textToSpeak, currentItem, selectedVoice, sessionId);
-        };
-
-        try {
-          if (!this.isPaused) {
-            await audio.play();
-          } else {
-            this.notifyState();
-            this.itemStartListeners.forEach((l) => l(this.currentIndex, currentItem));
-            this.notifyWord(0);
-          }
-          return;
-        } catch {
-          this.cancelSyncLoop();
-          this.stopCurrentAudio();
         }
+        return;
+      } catch {
+        this.cancelSyncLoop();
+        this.stopCurrentAudio();
       }
     }
 
-    // Path B: Browser Web Speech API with character-offset boundary tracking + 60fps phonetic fallback
+    // Path B: Browser Web Speech API with character-offset boundary tracking + calibrated 60fps phonetic sync
     this.playWithBrowserSynth(textToSpeak, currentItem, selectedVoice, sessionId);
   }
 
@@ -1248,12 +1301,13 @@ class SpeechService {
     const cumulativeWeights: number[] = [];
     let totalWeight = 0;
     for (const p of profiles) {
-      totalWeight += p.spokenWeight + p.pauseWeight * 0.55;
+      totalWeight += p.spokenWeight + p.pauseWeight * 0.25;
       cumulativeWeights.push(totalWeight);
     }
     if (totalWeight <= 0) totalWeight = 1;
 
-    const estimatedDurationSec = Math.max(0.8, totalWeight / (3.15 * this.rate));
+    // Calibrated to ~205 WPM (6.85 phonetic weight units/sec at 1.0x), dynamically refined if onboundary fires
+    let estimatedDurationSec = Math.max(0.45, totalWeight / (6.85 * this.rate));
     let synthStartPerf = performance.now();
     let pausedAccumMs = 0;
     let lastPauseStart = 0;
@@ -1269,8 +1323,8 @@ class SpeechService {
             lastPauseStart = 0;
           }
           if (!this.boundaryEventFired) {
-            const elapsedSec = (performance.now() - synthStartPerf - pausedAccumMs) / 1000;
-            const ratio = Math.min(0.99, Math.max(0, elapsedSec / estimatedDurationSec));
+            const elapsedSec = (performance.now() - synthStartPerf - pausedAccumMs) / 1000 + 0.06;
+            const ratio = Math.min(0.995, Math.max(0, elapsedSec / estimatedDurationSec));
             const targetW = ratio * totalWeight;
             let idx = cumulativeWeights.findIndex((cw) => cw >= targetW);
             if (idx === -1) idx = this.currentWords.length - 1;
@@ -1296,7 +1350,6 @@ class SpeechService {
 
     utterance.onboundary = (event: SpeechSynthesisEvent) => {
       if (sessionId !== this.playbackSessionId) return;
-      // Only lock onto native boundary events if they are word-level events (not a single sentence event at index 0)
       if (typeof event.charIndex === 'number' && (event.name === 'word' || event.charIndex > 0)) {
         if (event.charIndex > 0) {
           this.boundaryEventFired = true;
@@ -1308,6 +1361,13 @@ class SpeechService {
             matched = i;
           } else {
             break;
+          }
+        }
+        if (matched > 0 && matched < cumulativeWeights.length) {
+          const elapsedSec = Math.max(0.05, (performance.now() - synthStartPerf - pausedAccumMs) / 1000);
+          const weightBefore = cumulativeWeights[matched - 1];
+          if (weightBefore > 0.5) {
+            estimatedDurationSec = Math.max(0.45, (elapsedSec / weightBefore) * totalWeight);
           }
         }
         if (matched !== this.currentWordIndex) {

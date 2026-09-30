@@ -287,7 +287,24 @@ export interface DictionaryKnowledgeResult {
     partOfSpeech: string;
     definition: string;
     example?: string;
+    source?: string;
   }>;
+  wiktionaryDefinitions?: Array<{
+    partOfSpeech: string;
+    definition: string;
+  }>;
+  technicalWiki?: {
+    tag: string;
+    excerpt: string;
+    url: string;
+    source: string;
+  };
+  duckDuckGoAbstract?: {
+    heading: string;
+    abstract: string;
+    url: string;
+    source: string;
+  };
   synonyms: string[];
   relatedTerms: Array<{ word: string; score?: number; def?: string }>;
   wikidata?: {
@@ -303,6 +320,28 @@ export interface DictionaryKnowledgeResult {
     url: string;
     thumbnailUrl?: string;
   };
+}
+
+export interface TechWordEntry {
+  id: string;
+  term: string;
+  fullForm?: string;
+  domain:
+    | 'AI & Machine Learning'
+    | 'CSE & Algorithms'
+    | 'Systems & Cloud'
+    | 'Hardware & Chips'
+    | 'Software Engineering'
+    | 'From This Video';
+  importance: 'essential' | 'high' | 'core';
+  plainMeaning: string;
+  techArchitecture: string;
+  realWorldExample: string;
+  complexityOrMetric?: string;
+  relatedWords: string[];
+  contextInVideo?: string;
+  timestampSeconds?: number;
+  formattedTime?: string;
 }
 
 export interface YouTubeCommentItem {
