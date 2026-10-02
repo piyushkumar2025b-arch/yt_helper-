@@ -78,8 +78,17 @@ export const TechWordsSearcherPanel: React.FC<TechWordsSearcherPanelProps> = ({
   }, [summaryMarkdown, videoTitle, transcriptSegments]);
 
   const filteredWords = useMemo(() => {
+    // If no search query, strictly show videoMatchedWords filtered by domain (ZERO default words)
+    if (!searchQuery.trim()) {
+      if (domainFilter === 'all') return videoMatchedWords;
+      if (domainFilter === 'From This Video') {
+        return videoMatchedWords.filter((e) => e.domain === 'From This Video' || e.contextInVideo !== undefined);
+      }
+      return videoMatchedWords.filter((e) => e.domain === domainFilter);
+    }
+    // If user explicitly searched, search within videoMatchedWords first, and if query has no matches, search allWords
     return searchTechWordsHighGrade(searchQuery, allWords, domainFilter);
-  }, [searchQuery, allWords, domainFilter]);
+  }, [searchQuery, videoMatchedWords, allWords, domainFilter]);
 
   const performDeepDictionaryLookup = async (
     termToLookup: string,
@@ -91,6 +100,11 @@ export const TechWordsSearcherPanel: React.FC<TechWordsSearcherPanelProps> = ({
 
     const existingEntry =
       matchedEntry ||
+      videoMatchedWords.find(
+        (w) =>
+          w.term.toLowerCase() === cleanQuery.toLowerCase() ||
+          w.term.toLowerCase().includes(cleanQuery.toLowerCase())
+      ) ||
       allWords.find(
         (w) =>
           w.term.toLowerCase() === cleanQuery.toLowerCase() ||
@@ -182,12 +196,16 @@ export const TechWordsSearcherPanel: React.FC<TechWordsSearcherPanelProps> = ({
     if (initialSearchQuery.trim()) {
       setSearchQuery(initialSearchQuery);
       performDeepDictionaryLookup(initialSearchQuery, undefined, true);
-    } else if (!selectedWord && allWords.length > 0) {
-      const first = videoMatchedWords[0] || allWords[0];
-      setSelectedWord(first);
-      performDeepDictionaryLookup(first.term, first, false);
+    } else if (videoMatchedWords.length > 0) {
+      if (!selectedWord || !videoMatchedWords.some((w) => w.id === selectedWord.id)) {
+        const first = videoMatchedWords[0];
+        setSelectedWord(first);
+        performDeepDictionaryLookup(first.term, first, false);
+      }
+    } else {
+      setSelectedWord(null);
     }
-  }, [initialSearchQuery]);
+  }, [initialSearchQuery, videoMatchedWords]);
 
   const handleListen = (id: string, text: string, audioUrl?: string) => {
     if (audioUrl) {
@@ -262,44 +280,47 @@ export const TechWordsSearcherPanel: React.FC<TechWordsSearcherPanelProps> = ({
     setAppendedIds((prev) => new Set(prev).add(word.id));
   };
 
-  const domainTabs = [
-    { id: 'all', label: `All Important Words (${allWords.length})` },
-    { id: 'From This Video', label: `From This Video (${videoMatchedWords.length})` },
-    {
-      id: 'AI & Machine Learning',
-      label: `AI & ML (${allWords.filter((w) => w.domain === 'AI & Machine Learning').length})`,
-    },
-    {
-      id: 'CSE & Algorithms',
-      label: `CSE & Algorithms (${allWords.filter((w) => w.domain === 'CSE & Algorithms').length})`,
-    },
-    {
-      id: 'Systems & Cloud',
-      label: `Systems & Cloud (${allWords.filter((w) => w.domain === 'Systems & Cloud').length})`,
-    },
-    {
-      id: 'Hardware & Chips',
-      label: `Hardware & Chips (${allWords.filter((w) => w.domain === 'Hardware & Chips').length})`,
-    },
-  ];
+  const domainTabs = useMemo(() => {
+    const counts = {
+      all: videoMatchedWords.length,
+      ai: videoMatchedWords.filter((w) => w.domain === 'AI & Machine Learning').length,
+      networking: videoMatchedWords.filter((w) => w.domain === 'Networking & Protocols').length,
+      systems: videoMatchedWords.filter((w) => w.domain === 'Systems & Cloud').length,
+      cse: videoMatchedWords.filter((w) => w.domain === 'CSE & Algorithms').length,
+      hardware: videoMatchedWords.filter((w) => w.domain === 'Hardware & Chips').length,
+      software: videoMatchedWords.filter((w) => w.domain === 'Software Engineering').length,
+      video: videoMatchedWords.filter((w) => w.domain === 'From This Video').length,
+    };
+
+    return [
+      { id: 'all', label: `All Extracted Words (${counts.all})`, count: counts.all },
+      { id: 'AI & Machine Learning', label: `AI & ML (${counts.ai})`, count: counts.ai },
+      { id: 'Networking & Protocols', label: `Networking (${counts.networking})`, count: counts.networking },
+      { id: 'Systems & Cloud', label: `Systems & Cloud (${counts.systems})`, count: counts.systems },
+      { id: 'CSE & Algorithms', label: `CSE & Algorithms (${counts.cse})`, count: counts.cse },
+      { id: 'Hardware & Chips', label: `Hardware & Chips (${counts.hardware})`, count: counts.hardware },
+      { id: 'Software Engineering', label: `Software Eng (${counts.software})`, count: counts.software },
+      { id: 'From This Video', label: `Video Terms (${counts.video})`, count: counts.video },
+    ].filter((tab) => tab.id === 'all' || (tab.count !== undefined && tab.count > 0));
+  }, [videoMatchedWords]);
 
   return (
     <div className="w-full space-y-5">
-      {/* Header & High-Grade Search Bar */}
+      {/* Header & Search Bar */}
       <div className={`pb-4 border-b ${themeConfig.borderLight} space-y-3.5`}>
         <div className="flex flex-wrap items-center justify-between gap-2.5">
           <div className="space-y-0.5">
             <div className="flex items-center gap-2 flex-wrap">
               <Cpu className="w-4 h-4 text-indigo-400" />
               <h2 className={`text-sm sm:text-base font-bold tracking-tight ${themeConfig.textPrimary}`}>
-                Tech, AI &amp; CSE Words Searcher + Open Multi-Dictionary
+                Technical &amp; Video Key Words
               </h2>
               <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-indigo-500/15 text-indigo-400">
-                Google Dictionary · Wiktionary · StackOverflow Wiki · Wikipedia · Wikidata
+                Extracted from Video Transcript
               </span>
             </div>
             <p className={`text-[11px] ${themeConfig.textMuted}`}>
-              High-grade search for essential AI, Computer Science (CSE), Algorithms, Systems, and Video terms—with plain-English meanings, under-the-hood technological architecture, and live multi-dictionary lookup.
+              Technical, AI, networking, system design, and CSE terms extracted directly from this video with exact timestamps, plain-English explanations, and live multi-dictionary lookup.
             </p>
           </div>
 
@@ -386,7 +407,7 @@ export const TechWordsSearcherPanel: React.FC<TechWordsSearcherPanelProps> = ({
               {searchQuery.trim()
                 ? `Search Matches (${filteredWords.length})`
                 : domainFilter === 'all'
-                ? `Most Important Tech, AI, CSE & Video Words (${filteredWords.length})`
+                ? `Extracted Video Words (${filteredWords.length})`
                 : `${domainFilter} (${filteredWords.length})`}
             </span>
             {searchQuery.trim() && filteredWords.length === 0 && (
@@ -421,8 +442,23 @@ export const TechWordsSearcherPanel: React.FC<TechWordsSearcherPanelProps> = ({
             </div>
           )}
 
-          <div className={`divide-y ${themeConfig.borderLight} max-h-[72vh] overflow-y-auto pr-1`}>
-            {filteredWords.map((word) => {
+          {filteredWords.length === 0 ? (
+            <div className={`p-8 text-center rounded-xl border ${themeConfig.borderLight} bg-slate-500/5 space-y-2`}>
+              <Cpu className="w-8 h-8 mx-auto text-indigo-400 opacity-60" />
+              <p className={`text-xs font-semibold ${themeConfig.textPrimary}`}>
+                {searchQuery.trim()
+                  ? `No video matches for "${searchQuery.trim()}"`
+                  : 'No technical words extracted from this video yet'}
+              </p>
+              <p className={`text-[11px] ${themeConfig.textMuted} max-w-sm mx-auto`}>
+                {searchQuery.trim()
+                  ? 'Click "Deep Multi-Dictionary Search" above to lookup this concept across Google Dictionary, Wiktionary, and Wikipedia.'
+                  : 'Load a video with speech or transcript above to extract technical and domain terms.'}
+              </p>
+            </div>
+          ) : (
+            <div className={`divide-y ${themeConfig.borderLight} max-h-[72vh] overflow-y-auto pr-1`}>
+              {filteredWords.map((word) => {
               const isSelected = selectedWord?.id === word.id;
               const isSaved = savedIds.has(word.id);
               const isAppended = appendedIds.has(word.id);
@@ -522,6 +558,7 @@ export const TechWordsSearcherPanel: React.FC<TechWordsSearcherPanelProps> = ({
               );
             })}
           </div>
+          )}
         </div>
 
         {/* RIGHT COLUMN (7 cols): Deep Technological Breakdown + Live Multi-Dictionary Results */}
@@ -995,7 +1032,17 @@ export const TechWordsSearcherPanel: React.FC<TechWordsSearcherPanelProps> = ({
                 </div>
               </div>
             </div>
-          ) : null}
+          ) : (
+            <div className={`p-8 text-center rounded-xl border ${themeConfig.borderLight} bg-slate-500/5 space-y-2`}>
+              <BookOpen className="w-8 h-8 mx-auto text-indigo-400 opacity-60" />
+              <h3 className={`text-sm font-bold ${themeConfig.textPrimary}`}>
+                Word Inspector
+              </h3>
+              <p className={`text-xs ${themeConfig.textMuted} max-w-sm mx-auto`}>
+                Select an extracted word from the list or search for any term to inspect its plain meaning, technological architecture, engineering examples, and live multi-dictionary references.
+              </p>
+            </div>
+          )}
         </div>
       </div>
     </div>

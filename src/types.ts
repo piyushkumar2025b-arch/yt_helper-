@@ -401,6 +401,7 @@ export interface TechWordEntry {
     | 'AI & Machine Learning'
     | 'CSE & Algorithms'
     | 'Systems & Cloud'
+    | 'Networking & Protocols'
     | 'Hardware & Chips'
     | 'Software Engineering'
     | 'From This Video';
