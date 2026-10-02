@@ -1,7 +1,8 @@
 {
-  "name": "react-example",
+  "name": "opentranscript-ai",
+  "version": "1.0.0",
+  "description": "YouTube Transcriber & Multi-Provider AI Summarizer",
   "private": true,
-  "version": "0.0.0",
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
@@ -9,7 +10,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
-    "lint": "tsc --noEmit --skipLibCheck"
+    "lint": "tsc --noEmit --skipLibCheck",
+    "test": "tsx --test src/**/*.test.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
@@ -32,7 +34,7 @@
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "autoprefixer": "^10.4.21",
-    "esbuild": "^0.25.0",
+    "esbuild": "^0.28.0",
     "tailwindcss": "^4.3.3",
     "tsx": "^4.21.0",
     "typescript": "^7.0.2",

@@ -15,6 +15,7 @@
     "isolatedModules": true,
     "moduleDetection": "force",
     "jsx": "react-jsx",
+    "strict": true,
     "allowImportingTsExtensions": true,
     "noEmit": true
   }

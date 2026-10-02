@@ -36,8 +36,25 @@ Configure any of the following server-side keys in `.env` (all keys are optional
 - **Reverse Proxy & Origin Configuration**:
   - `APP_URL` / `PUBLIC_ORIGIN` / `ALLOWED_ORIGINS`: Allowed public origins when deployed behind a reverse proxy.
   - `TRUST_PROXY`: Set to `1` (or `true`) only when running behind a trusted reverse proxy so `req.ip` and `X-Forwarded-Host` are honored safely.
+- **Rate Limiting & Safety Controls (`src/server/rateLimiter.ts`)**:
+  - `RATE_LIMIT_WINDOW_MS`: Time window in milliseconds (default: `60000` / 1 minute).
+  - `RATE_LIMIT_MAX_REQUESTS`: Max general requests per window (default: `120`).
+  - `LLM_RATE_LIMIT_MAX_REQUESTS`: Max AI generation requests per window (default: `25`).
+  - `RATE_LIMIT_MAX_ENTRIES`: Max tracked IP entries with FIFO/expired pruning (default: `2000`).
 
-### 3. Run in Development Mode
+### 3. Firebase Client Configuration (BUG-013)
+
+The parameters in `src/firebase-applet-config.json` identify the Firebase web project for client-side Google Authentication and Firestore database sync. As per Firebase architecture, client identifiers are public by design; all sensitive database reads/writes are governed by server-enforced security rules in `firestore.rules`, and all AI LLM keys remain strictly in server environment variables.
+
+### 4. Run Automated Tests (BUG-009)
+
+Execute unit tests covering subtitle parsing, YouTube ID extraction, in-memory rate limiting, and theme consistency:
+
+```bash
+npm test
+```
+
+### 5. Run in Development Mode
 
 Starts the Express + Vite middleware server on port `3000`:
 
@@ -45,9 +62,10 @@ Starts the Express + Vite middleware server on port `3000`:
 npm run dev
 ```
 
-### 4. Type-Check & Production Build
+### 6. Type-Check & Production Build
 
 ```bash
+npm test
 npm run lint
 npm run build
 npm start

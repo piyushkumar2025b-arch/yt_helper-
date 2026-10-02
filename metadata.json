@@ -1,5 +1,5 @@
 {
-  "name": "Remix OpenTranscript AI - YouTube Transcriber \u0026 OpenRouter Summarizer",
+  "name": "Remix OpenTranscript AI - YouTube Transcriber & OpenRouter Summarizer",
   "description": "Extract YouTube video transcripts using open-source tools and generate deep comprehensive summaries with OpenRouter AI models and audio playback.",
   "requestFramePermissions": [],
   "majorCapabilities": [
