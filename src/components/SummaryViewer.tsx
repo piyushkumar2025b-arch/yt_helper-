@@ -304,7 +304,7 @@ export const SummaryViewer: React.FC<SummaryViewerProps> = ({
   provider = 'gemini',
   openRouterKey = '',
   selectedModelId = 'meta-llama/llama-3.3-70b-instruct:free',
-  currentTheme = 'midnight',
+  currentTheme = 'sepia',
   onOpenVoiceSettings,
   onOpenResearch,
   onOpenTypography,
@@ -410,7 +410,7 @@ export const SummaryViewer: React.FC<SummaryViewerProps> = ({
   const lastWordTopRef = useRef<number>(0);
   const translateAbortRef = useRef<AbortController | null>(null);
 
-  const themeConfig = APP_THEMES[currentTheme] || APP_THEMES.midnight;
+  const themeConfig = APP_THEMES[currentTheme] || APP_THEMES.sepia;
 
   useEffect(() => {
     if (summary?.summaryType) {

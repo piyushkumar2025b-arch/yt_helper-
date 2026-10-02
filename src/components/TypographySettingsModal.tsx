@@ -94,11 +94,11 @@ export const TypographySettingsModal: React.FC<TypographySettingsModalProps> = (
   onClose,
   typography,
   onChangeTypography,
-  currentTheme = 'midnight',
+  currentTheme = 'sepia',
 }) => {
   if (!isOpen) return null;
 
-  const themeConfig = APP_THEMES[currentTheme] || APP_THEMES.midnight;
+  const themeConfig = APP_THEMES[currentTheme] || APP_THEMES.sepia;
 
   const activeFont = FONT_OPTIONS.find((f) => f.id === typography.fontFamily) || FONT_OPTIONS[0];
 
@@ -258,10 +258,10 @@ export const TypographySettingsModal: React.FC<TypographySettingsModalProps> = (
           </div>
 
           {/* Live Typography Preview Box */}
-          <div className={`p-4 rounded-xl border ${themeConfig.borderLight} bg-slate-900/60 space-y-2`}>
-            <div className="text-[10px] uppercase font-mono tracking-wider text-slate-400 font-semibold flex items-center justify-between">
-              <span>Live Reading Preview ({activeFont.name})</span>
-              <span>100% Responsive</span>
+          <div className={`p-4 rounded-xl border ${themeConfig.border} ${themeConfig.pageBg} space-y-2`}>
+            <div className={`text-[10px] uppercase font-mono tracking-wider ${themeConfig.textMuted} font-semibold flex items-center justify-between`}>
+              <span>Live Reading Preview ({activeFont.name} • {themeConfig.name})</span>
+              <span>Eye-Safe Contrast</span>
             </div>
 
             <div
@@ -282,15 +282,15 @@ export const TypographySettingsModal: React.FC<TypographySettingsModalProps> = (
                     ? '2.0'
                     : '1.75',
               }}
-              className="space-y-2 pt-1 text-slate-200"
+              className={`space-y-2 pt-1 ${themeConfig.textSecondary}`}
             >
-              <h4 className="font-bold text-lg text-white">
+              <h4 className={`font-bold text-lg ${themeConfig.textPrimary}`}>
                 Connecting the Dots: The Art of Typography
               </h4>
               <p>
                 "You cannot connect the dots looking forward; you can only connect them looking backwards. You have to trust that the dots will somehow connect in your future."
               </p>
-              <div className="text-xs text-indigo-400 font-mono">
+              <div className={`text-xs ${themeConfig.accent} font-mono`}>
                 [04:20] Calligraphy, variable typography, and proportional spacing.
               </div>
             </div>
@@ -298,7 +298,7 @@ export const TypographySettingsModal: React.FC<TypographySettingsModalProps> = (
         </div>
 
         {/* Modal Footer */}
-        <div className={`p-4 border-t ${themeConfig.borderLight} bg-slate-900/40 flex items-center justify-between`}>
+        <div className={`p-4 border-t ${themeConfig.borderLight} ${themeConfig.headerBg} flex items-center justify-between`}>
           <button
             type="button"
             onClick={() => onChangeTypography(DEFAULT_TYPOGRAPHY)}
@@ -311,7 +311,7 @@ export const TypographySettingsModal: React.FC<TypographySettingsModalProps> = (
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold cursor-pointer transition-colors shadow-sm"
+            className={`px-4 py-2 rounded-xl ${themeConfig.primaryButton} text-xs font-semibold cursor-pointer transition-colors shadow-sm`}
           >
             Done
           </button>

@@ -141,7 +141,7 @@ export const SidebarMenu: React.FC<SidebarMenuProps> = ({
   const [isSamplesOpen, setIsSamplesOpen] = useState(false);
   const samplesRef = useRef<HTMLDivElement>(null);
 
-  const themeConfig = APP_THEMES[currentTheme] || APP_THEMES.midnight;
+  const themeConfig = APP_THEMES[currentTheme] || APP_THEMES.sepia;
 
   useEffect(() => {
     setUrlInput(currentUrl);
@@ -807,38 +807,56 @@ export const SidebarMenu: React.FC<SidebarMenuProps> = ({
           </div>
         </div>
 
-        {/* 7. Theme Selector */}
-        <div className="space-y-1.5">
-          <label className={`text-[10px] font-semibold uppercase tracking-wider ${themeConfig.textMuted} block`}>
-            Themes (12)
-          </label>
-          <div className="grid grid-cols-2 gap-1">
-            {Object.values(APP_THEMES).map((t) => {
-              const isSelected = t.id === currentTheme;
-              return (
-                <button
-                  key={t.id}
-                  type="button"
-                  onClick={() => onSelectTheme(t.id)}
-                  title={t.description}
-                  className={`flex items-center justify-between gap-1 px-2 py-1 rounded text-[11px] font-medium transition-colors cursor-pointer whitespace-nowrap ${
-                    isSelected
-                      ? `${themeConfig.accentBg} ${themeConfig.accent} font-semibold`
-                      : `${themeConfig.textSecondary} hover:bg-slate-500/10`
-                  }`}
-                >
-                  <div className="flex items-center gap-1.5 truncate">
-                    <span
-                      className="w-2 h-2 rounded-full shrink-0"
-                      style={{ backgroundColor: t.icon }}
-                    />
-                    <span className="truncate">{t.name}</span>
-                  </div>
-                  {isSelected && <Check className="w-2.5 h-2.5 shrink-0" />}
-                </button>
-              );
-            })}
+        {/* 7. Realistic Eye-Safe Theme Selector */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <label className={`text-[10px] font-semibold uppercase tracking-wider ${themeConfig.textMuted} block`}>
+              Reading &amp; Studio Themes ({Object.keys(APP_THEMES).length})
+            </label>
+            <span className={`text-[9px] font-mono ${themeConfig.textMuted}`}>Eye-Safe</span>
           </div>
+          {(['daylight', 'dark'] as const).map((cat) => {
+            const themesInCat = Object.values(APP_THEMES).filter((t) => (t.category || 'dark') === cat);
+            return (
+              <div key={cat} className="space-y-1">
+                <div className={`text-[9px] font-semibold uppercase tracking-wider ${themeConfig.textMuted} px-0.5`}>
+                  {cat === 'daylight' ? 'Daylight & Archival Paper' : 'Low-Light & Studio Dark'}
+                </div>
+                <div className="grid grid-cols-2 gap-1">
+                  {themesInCat.map((t) => {
+                    const isSelected = t.id === currentTheme;
+                    return (
+                      <button
+                        key={t.id}
+                        type="button"
+                        onClick={() => onSelectTheme(t.id)}
+                        title={t.description}
+                        className={`flex items-center justify-between gap-1 px-2 py-1 rounded text-[11px] font-medium transition-colors cursor-pointer whitespace-nowrap border ${
+                          isSelected
+                            ? `${themeConfig.accentBg} ${themeConfig.accent} ${themeConfig.border} font-semibold shadow-xs`
+                            : `border-transparent ${themeConfig.textSecondary} hover:bg-slate-500/10`
+                        }`}
+                      >
+                        <div className="flex items-center gap-1.5 truncate">
+                          <span
+                            className="w-3.5 h-3.5 rounded shrink-0 border border-black/20 flex items-center justify-center shadow-2xs"
+                            style={{ backgroundColor: t.canvasHex || t.icon }}
+                          >
+                            <span
+                              className="w-1.5 h-1.5 rounded-full"
+                              style={{ backgroundColor: t.icon }}
+                            />
+                          </span>
+                          <span className="truncate">{t.name}</span>
+                        </div>
+                        {isSelected && <Check className="w-2.5 h-2.5 shrink-0" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
     </aside>

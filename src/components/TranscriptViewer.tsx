@@ -42,7 +42,7 @@ export const TranscriptViewer: React.FC<TranscriptViewerProps> = ({
   metadata,
   onSeekToTimestamp,
   activeTimestamp,
-  currentTheme = 'midnight',
+  currentTheme = 'sepia',
   onOpenVoiceSettings,
   onAppendToSummary,
   onSaveToList,
@@ -65,7 +65,7 @@ export const TranscriptViewer: React.FC<TranscriptViewerProps> = ({
   const activeWordRef = useRef<HTMLSpanElement | null>(null);
   const lastWordTopRef = useRef<number>(0);
 
-  const themeConfig = APP_THEMES[currentTheme] || APP_THEMES.midnight;
+  const themeConfig = APP_THEMES[currentTheme] || APP_THEMES.sepia;
 
   useEffect(() => {
     const handleOutsideClick = (e: MouseEvent) => {

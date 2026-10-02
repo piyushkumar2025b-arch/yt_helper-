@@ -103,18 +103,21 @@ export interface SampleVideo {
 }
 
 export type ThemeId =
-  | 'midnight'
-  | 'light'
   | 'sepia'
-  | 'cyberpunk'
-  | 'forest'
-  | 'nord'
-  | 'sunset'
-  | 'oled'
-  | 'coffee'
-  | 'ocean'
+  | 'light'
+  | 'solarized'
+  | 'alabaster'
   | 'matcha'
-  | 'rose';
+  | 'rose'
+  | 'nordlight'
+  | 'midnight'
+  | 'nord'
+  | 'coffee'
+  | 'forest'
+  | 'ocean'
+  | 'sunset'
+  | 'cyberpunk'
+  | 'oled';
 
 export interface WebSearchResult {
   id: string;

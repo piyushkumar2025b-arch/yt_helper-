@@ -67,14 +67,19 @@ import {
 import { AlertCircle, Check, Minimize2, PanelLeft, X } from 'lucide-react';
 
 export default function App() {
-  // Theme state with localStorage persistence
+  // Theme state with localStorage persistence (Warm Sepia is default)
   const [theme, setTheme] = useState<ThemeId>(() => {
-    return (typeof window !== 'undefined' && (localStorage.getItem('open_transcript_theme') as ThemeId)) || 'midnight';
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('open_transcript_theme_v2') as ThemeId | null;
+      if (saved && APP_THEMES[saved]) return saved;
+    }
+    return 'sepia';
   });
 
   const handleSelectTheme = (newTheme: ThemeId) => {
     setTheme(newTheme);
     if (typeof window !== 'undefined') {
+      localStorage.setItem('open_transcript_theme_v2', newTheme);
       localStorage.setItem('open_transcript_theme', newTheme);
     }
   };
@@ -1091,7 +1096,7 @@ export default function App() {
 
   // Do not auto-fetch or auto-summarize over the network on every page load (H-07)
 
-  const themeConfig = APP_THEMES[theme] || APP_THEMES.midnight;
+  const themeConfig = APP_THEMES[theme] || APP_THEMES.sepia;
 
   return (
     <div className={`h-screen w-screen overflow-hidden ${themeConfig.pageBg} ${themeConfig.textPrimary} flex flex-col antialiased transition-colors`}>
