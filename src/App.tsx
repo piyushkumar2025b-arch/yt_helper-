@@ -1052,7 +1052,12 @@ export default function App() {
     }
   };
 
-  const handleManualSubmit = (text: string, title: string, customSegments?: TranscriptSegment[]) => {
+  const handleManualSubmit = (
+    text: string,
+    title: string,
+    customSegments?: TranscriptSegment[],
+    customMeta?: Partial<VideoMetadata>
+  ) => {
     setErrorMessage(null);
     const generatedSegments: TranscriptSegment[] =
       customSegments && customSegments.length > 0
@@ -1067,15 +1072,20 @@ export default function App() {
     const durationSec = lastSeg ? lastSeg.start + lastSeg.duration : generatedSegments.length * 4;
 
     const meta: VideoMetadata = {
-      videoId: '',
-      url: '',
-      title: title || 'Uploaded Document',
-      authorName: 'Uploaded Document',
+      videoId: customMeta?.videoId || (customMeta?.mediaUrl ? `media_${Date.now()}` : ''),
+      url: customMeta?.url || '',
+      title: title || customMeta?.title || 'Uploaded Document',
+      authorName: customMeta?.authorName || 'Direct Media',
+      sourceType: customMeta?.sourceType || 'uploaded_file',
+      mediaUrl: customMeta?.mediaUrl,
+      embedUrl: customMeta?.embedUrl,
+      thumbnailUrl: customMeta?.thumbnailUrl,
       totalSegments: generatedSegments.length,
       totalWords,
       estimatedTokens: estTokens,
       durationSeconds: Math.round(durationSec),
       durationFormatted: formatTime(durationSec),
+      ...customMeta,
     };
 
     setMetadata(meta);
@@ -1083,9 +1093,13 @@ export default function App() {
     setFullText(cleanFullText);
     appendedResearchRef.current = '';
 
+    if (meta.mediaUrl || meta.embedUrl) {
+      setShowVideo(true);
+    }
+
     recordUserActivity({
       actionType: 'transcript',
-      title: `Imported Transcript: ${meta.title}`,
+      title: `Imported Media: ${meta.title}`,
       query: meta.title,
       details: `${generatedSegments.length} segments · ${totalWords} words (${meta.durationFormatted})`,
       videoTitle: meta.title,

@@ -158,6 +158,124 @@ Derek Muller (Veritasium) explores the **Collatz Conjecture** (also known as the
 - **[16:20]** [**Almost All Orbits of the Collatz Map Attain Almost Bounded Values (Terence Tao, 2019)**](https://arxiv.org/abs/1909.03562) — Terence Tao's breakthrough paper proving logarithmic density bounds on 3x + 1 orbits ([PDF](https://arxiv.org/pdf/1909.03562.pdf))
 - **[01:40]** [**The Ultimate Challenge: The 3x + 1 Problem (Jeffrey C. Lagarias Survey)**](https://arxiv.org/abs/math/0309224) — Comprehensive annotated bibliography and history of the Collatz conjecture ([Wikipedia](https://en.wikipedia.org/wiki/Collatz_conjecture))
 - **[05:10]** [**OEIS A006577 Hailstone Stopping Times**](https://oeis.org/A006577) & [**2^68 Computational Verification Dataset**](https://pcbarina.fit.vutbr.cz/) — Exact stopping time sequences and distributed supercomputing verification records`,
+
+  // TED Talks: Sir Ken Robinson - Do Schools Kill Creativity?
+  'sir_ken_robinson_do_schools_kill_creativity': (title: string) => `# ${title}
+
+## What This Talk Is Really About
+In the most viewed TED Talk of all time, **Sir Ken Robinson** makes an entertaining and profoundly moving case for creating an education system that nurtures (rather than undermines) creativity. He argues that human creativity is as crucial as literacy, yet traditional school systems worldwide were built during the 19th-century Industrial Revolution to serve narrow economic needs, inadvertently stigmatizing mistakes and squandering extraordinary human talents.
+
+---
+
+## Step-by-Step Story Walkthrough
+
+- **[00:00] The Unpredictable Future**:
+  Sir Ken opens with disarming humor, highlighting that children starting school today will retire in the second half of the 21st century—a world whose technology, economy, and society none of us can predict.
+
+- **[01:55] Creativity Is as Important as Literacy**:
+  He makes his central thesis: **Creativity now is as important in education as literacy, and we should treat it with the exact same status.**
+
+- **[03:40] "They Will in a Minute" (The Drawing Girl)**:
+  He tells the famous story of a six-year-old girl in a drawing class who rarely paid attention. When the teacher asked what she was drawing, she answered, "I’m drawing a picture of God." The teacher remarked, "Nobody knows what God looks like." Without missing a beat, the little girl replied: **"They will in a minute."**
+
+- **[04:25] The Stigma of Being Wrong**:
+  Children naturally take chances and are not afraid to be wrong. While being wrong isn't the same as being creative, **if you are not prepared to be wrong, you will never come up with anything original.** By adulthood, most kids have been conditioned to dread mistakes.
+
+- **[06:30] The Global Hierarchy of Subjects**:
+  Every educational system in the world places math and languages at the peak, followed by humanities, with the arts at the very bottom. Inside the arts, art and music outrank drama and dance. This hierarchy was built to supply industrial factory workers and university professors, leaving brilliant dancers, makers, and innovators feeling worthless.
+
+- **[08:55] Gillian Lynne: "She Isn't Sick, She's a Dancer"**:
+  In the 1930s, eight-year-old Gillian Lynne was failing school, fidgeting constantly, and considered "hopeless" by teachers. A wise doctor sat her down, turned on the radio, watched her dance across the room, and told her mother: *"Gillian isn't sick; she's a dancer. Send her to dance school."* Gillian went on to choreograph *Cats* and *The Phantom of the Opera*, bringing joy to millions and becoming a multi-millionaire.
+
+---
+
+## Practical Takeaways
+1. **Redefine Intelligence**: Human intelligence is diverse, dynamic, and wonderfully interactive.
+2. **Encourage Experimentation**: Creating an environment where mistakes are celebrated as learning steps unlocks breakthrough creative problem-solving.
+3. **Educate the Whole Being**: Treat physical, artistic, and emotional intelligences with the same dignity as purely academic testing.`,
+
+  // Vimeo: The Maker (Zealous Creative)
+  '76979871': (title: string) => `# ${title}
+
+## What This Film Is Really About
+**The Maker** is an internationally acclaimed stop-motion animated short by Christopher Kezelos (Zealous Creative). Set in a timeless clockwork workshop, a burlap-and-velvet creature discovers his life is measured by the single cycle of an hourglass. Rather than despairing over his mortality, he pours every breath into creating a companion, giving his temporary existence enduring meaning.
+
+---
+
+## Story & Cinematography Breakdown
+
+- **[00:00] The Ticking Hourglass**:
+  The protagonist awakens beside an ornate brass hourglass and an ancient scroll titled *"The Creation"*. Realizing sand is rapidly running out, his purpose becomes clear: he has just enough time to build a soul.
+
+- **[01:50] The Alchemy of Craft**:
+  With breathtaking stop-motion artistry, he carves delicate wooden joints, stitches fine fabric, and places crystal eyes into a companion creature.
+
+- **[03:25] The Music Box Heart**:
+  He inserts a winding music box mechanism into the chest and tunes a miniature violin, initiating a haunting, beautiful violin duet.
+
+- **[04:20] The Transcendent Spark & The Gift of Time**:
+  As the final sands trickle away, the newborn companion opens her eyes. The maker vanishes into radiant dust, having completed his mission. She looks down, turns the hourglass over, and discovers the scroll to begin the creative cycle once more.
+
+---
+
+## Key Themes
+- **Creation as Transcendence**: Making art and connecting with others is how finite beings achieve infinite meaning.
+- **The Stewardship of Time**: Urgency does not excuse carelessness—true mastery comes from devoting everything to what matters most.`,
+
+  // Podcast RSS: Huberman Lab (Neuroscience of Focus)
+  'huberman_focus_podcast': (title: string) => `# ${title}
+
+## What This Episode Is Really About
+Dr. Andrew Huberman (Stanford School of Medicine) breaks down the neurobiology of focus, attention span, and mental stamina. He reveals why distraction is the default state of the human nervous system and outlines peer-reviewed behavioral protocols to enter and sustain deep work states without burnout.
+
+---
+
+## Step-by-Step Science Protocols
+
+- **[00:30] Focus Is a Three-Chemical System**:
+  - **Acetylcholine**: Acts as the brain's spotlight, narrowing sensory aperture to high resolution.
+  - **Epinephrine (Adrenaline)**: Provides autonomic arousal and physical alertness.
+  - **Dopamine**: Drives ongoing motivation and creates friction-reducing reward signals.
+
+- **[02:10] The Initial 10-Minute Friction Is Normal**:
+  The prefrontal cortex requires metabolic warm-up. Expect restlessness during the first 5 to 10 minutes of deep work; push through it without reaching for your phone.
+
+- **[03:10] Visual Focus Anchors Cognitive Focus**:
+  Staring at a fixed point or cursor on your screen for 30 to 60 seconds before beginning a task increases acetylcholine release in the frontal eye fields.
+
+- **[04:15] The 90-Minute Ultradian Work Cycle**:
+  The human brain operates on 90-minute ultradian cycles. Limit high-intensity technical work to 60–90 minute sprints, followed by 10–20 minutes of non-focused recovery.
+
+- **[05:25] Auditory Boost: 40 Hz Binaural Beats**:
+  Listening to 40 Hz gamma frequencies enhances frontal striatal connectivity and reduces task-switching latency.
+
+- **[06:25] The Physiological Sigh**:
+  Two quick nasal inhales followed by an extended oral exhale immediately lowers autonomic heart rate and clears mental agitation.`,
+
+  // Direct Audio: Apollo 11 Lunar Landing
+  'apollo11_lunar_landing': (title: string) => `# ${title}
+
+## What This Audio Recording Captures
+This is the original mission control and spacecraft flight audio from July 20, 1969, as the Apollo 11 Lunar Module *Eagle*, crewed by Neil Armstrong and Buzz Aldrin, touched down on the Moon's Sea of Tranquility with only seconds of fuel remaining.
+
+---
+
+## Historic Moments & Flight Milestones
+
+- **[00:18] The 1201 and 1202 Computer Alarms**:
+  The Apollo guidance computer was overloaded with radar data, but flight controller Steve Bales confirmed the executive software was prioritizing descent thrusters, giving the "GO" call.
+
+- **[01:35] Manual Redirection Over Boulder Field**:
+  Seeing the automated autopilot heading toward a football-field-sized crater filled with massive boulders, Neil Armstrong grabbed manual control to fly *Eagle* past the hazard.
+
+- **[02:35] 60 Seconds of Fuel Left**:
+  Houston calls out "60 seconds" of remaining descent propellant as dust from lunar engine exhaust begins obscuring visual cues.
+
+- **[03:25] "Contact Light. Engine Stop."**:
+  The blue contact light illuminates as the probe probes touch lunar soil.
+
+- **[03:43] "The Eagle Has Landed"**:
+  Neil Armstrong broadcasts: *"Houston, Tranquility Base here. The Eagle has landed."* CAPCOM Charlie Duke responds: *"We copy you on the ground. You got a bunch of guys about to turn blue. We’re breathing again. Thanks a lot."*`,
 };
 
 export function getSampleFallbackReport(videoId?: string, title = 'Video Breakdown'): string | null {

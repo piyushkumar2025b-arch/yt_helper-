@@ -7,10 +7,39 @@ export interface TranscriptSegment {
 
 export type ParsedSegment = TranscriptSegment;
 
+export type MediaSourceType =
+  | 'youtube'
+  | 'vimeo'
+  | 'dailymotion'
+  | 'twitch'
+  | 'ted'
+  | 'loom'
+  | 'podcast_rss'
+  | 'direct_audio'
+  | 'direct_video'
+  | 'direct_subtitle'
+  | 'uploaded_file'
+  | 'web_article'
+  | 'direct_text';
+
+export interface PodcastEpisodeItem {
+  id?: string;
+  title: string;
+  audioUrl: string;
+  duration?: string;
+  durationSeconds?: number;
+  pubDate?: string;
+  description?: string;
+  transcriptUrl?: string;
+}
+
 export interface VideoMetadata {
   videoId: string;
   url: string;
   title: string;
+  sourceType?: MediaSourceType;
+  mediaUrl?: string;
+  embedUrl?: string;
   authorName?: string;
   authorUrl?: string;
   thumbnailUrl?: string;
@@ -21,6 +50,9 @@ export interface VideoMetadata {
   totalWords: number;
   estimatedTokens: number;
   availableLanguages?: Array<{ code: string; name: string }>;
+  podcastFeedUrl?: string;
+  episodes?: PodcastEpisodeItem[];
+  selectedEpisodeIndex?: number;
 }
 
 export interface OpenRouterModel {
@@ -100,7 +132,12 @@ export interface SampleVideo {
   duration: string;
   category: string;
   url: string;
+  sourceType?: MediaSourceType;
+  badge?: string;
+  description?: string;
 }
+
+export type SampleMediaItem = SampleVideo;
 
 export type ThemeId =
   | 'sepia'

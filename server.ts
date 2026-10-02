@@ -30,6 +30,16 @@ import {
   buildGroundedExtractiveAnswer,
   buildGroundedDeepDive,
 } from './src/server/ragEngine.ts';
+import {
+  detectMediaSourceType,
+  fetchVimeoMetadataAndTranscript,
+  fetchDailymotionMetadataAndTranscript,
+  fetchTedTalkMetadataAndTranscript,
+  fetchPodcastRssMetadataAndTranscript,
+  fetchDirectMediaMetadataAndTranscript,
+  fetchWebArticleMetadataAndTranscript,
+  transcribeUploadedMedia,
+} from './src/server/mediaExtractor.ts';
 
 dotenv.config();
 
@@ -299,86 +309,70 @@ async function startServer() {
         return;
       }
 
-      const videoId = extractVideoId(rawInput);
+      const detected = detectMediaSourceType(rawInput);
 
-      // Branch A: Non-YouTube input — check if it is a direct subtitle/transcript URL or raw pasted transcript text
-      if (!videoId) {
-        if (/^https?:\/\//i.test(rawInput) && !/\s/.test(rawInput)) {
-          const safe = await isSafePublicUrl(rawInput);
-          if (!safe) {
-            res.status(400).json({ error: 'Invalid or restricted URL. Please provide a valid YouTube URL or public HTTPS transcript file.' });
-            return;
-          }
-          try {
-            const directRes = await fetch(rawInput, {
-              signal: AbortSignal.timeout(8000),
-              redirect: 'error',
-              headers: {
-                'User-Agent': 'Mozilla/5.0 (compatible; OpenTranscriptAI/1.0)',
-                Accept: 'text/plain, text/vtt, application/x-subrip, application/xml, application/json, */*',
-              },
-            });
-            if (!directRes.ok) {
-              res.status(400).json({ error: `Could not fetch transcript URL (HTTP ${directRes.status}).` });
-              return;
-            }
-            const bodyText = await directRes.text();
-            const parsedSegments = parseSubtitlePayload(bodyText, true);
-            if (!parsedSegments || parsedSegments.length === 0) {
-              res.status(400).json({ error: 'The provided URL did not contain recognizable transcript or subtitle text.' });
-              return;
-            }
-            const fullText = parsedSegments.map((s) => s.text).join(' ');
-            const totalWords = fullText.split(/\s+/).filter(Boolean).length;
-            const lastSeg = parsedSegments[parsedSegments.length - 1];
-            const durationSeconds = lastSeg ? lastSeg.start + lastSeg.duration : 0;
-            const urlFileName = new URL(rawInput).pathname.split('/').pop() || 'External Transcript';
+      // Branch A: Vimeo Video
+      if (detected.type === 'vimeo') {
+        const result = await fetchVimeoMetadataAndTranscript(detected.cleanUrl || rawInput, detected.id);
+        res.json({ ok: true, ...result });
+        return;
+      }
 
-            res.json({
-              ok: true,
-              metadata: {
-                videoId: '',
-                url: rawInput,
-                title: customTitle || urlFileName,
-                authorName: new URL(rawInput).hostname,
-                authorUrl: '',
-                thumbnailUrl: '',
-                durationSeconds: Math.round(durationSeconds),
-                durationFormatted: formatTime(durationSeconds),
-                totalSegments: parsedSegments.length,
-                totalWords,
-                estimatedTokens: Math.round(totalWords * 1.33),
-              },
-              segments: parsedSegments,
-              fullText,
-            });
-            return;
-          } catch (fetchErr: any) {
-            res.status(400).json({ error: fetchErr?.message || 'Failed to load direct transcript URL.' });
-            return;
-          }
+      // Branch B: Dailymotion Video
+      if (detected.type === 'dailymotion') {
+        const result = await fetchDailymotionMetadataAndTranscript(detected.cleanUrl || rawInput, detected.id);
+        res.json({ ok: true, ...result });
+        return;
+      }
+
+      // Branch C: TED Talks
+      if (detected.type === 'ted') {
+        const result = await fetchTedTalkMetadataAndTranscript(detected.cleanUrl || rawInput, detected.id);
+        res.json({ ok: true, ...result });
+        return;
+      }
+
+      // Branch D: Podcast RSS Feed
+      if (detected.type === 'podcast_rss') {
+        const epIdx = parseInt(String(req.body?.episodeIndex || req.query.episodeIndex || '0'), 10) || 0;
+        const result = await fetchPodcastRssMetadataAndTranscript(detected.cleanUrl || rawInput, epIdx);
+        res.json({ ok: true, ...result });
+        return;
+      }
+
+      // Branch E: Direct Audio or Direct Video URL
+      if (detected.type === 'direct_audio' || detected.type === 'direct_video') {
+        const result = await fetchDirectMediaMetadataAndTranscript(detected.cleanUrl || rawInput, customTitle);
+        res.json({ ok: true, ...result });
+        return;
+      }
+
+      // Branch F: Direct Subtitle URL
+      if (detected.type === 'direct_subtitle') {
+        const safe = await isSafePublicUrl(rawInput);
+        if (!safe) {
+          res.status(400).json({ error: 'Invalid or restricted URL.' });
+          return;
         }
-
-        // Check if rawInput itself is pasted transcript text (.srt, .vtt, [MM:SS] lines, JSON, or multi-word prose)
-        if (rawInput.length > 25 && (rawInput.includes(' ') || rawInput.includes('\n'))) {
-          const parsedSegments = parseSubtitlePayload(rawInput, true);
+        const directRes = await fetch(rawInput, { signal: AbortSignal.timeout(8000) });
+        if (directRes.ok) {
+          const bodyText = await directRes.text();
+          const parsedSegments = parseSubtitlePayload(bodyText, true);
           if (parsedSegments && parsedSegments.length > 0) {
             const fullText = parsedSegments.map((s) => s.text).join(' ');
             const totalWords = fullText.split(/\s+/).filter(Boolean).length;
             const lastSeg = parsedSegments[parsedSegments.length - 1];
             const durationSeconds = lastSeg ? lastSeg.start + lastSeg.duration : 0;
-
             res.json({
               ok: true,
               metadata: {
                 videoId: '',
-                url: '',
-                title: customTitle || 'Pasted / Uploaded Transcript',
-                authorName: 'Direct Input',
-                authorUrl: '',
-                thumbnailUrl: '',
+                url: rawInput,
+                title: customTitle || new URL(rawInput).pathname.split('/').pop() || 'Subtitle Document',
+                authorName: new URL(rawInput).hostname,
                 durationSeconds: Math.round(durationSeconds),
                 durationFormatted: formatTime(durationSeconds),
+                sourceType: 'direct_subtitle',
                 totalSegments: parsedSegments.length,
                 totalWords,
                 estimatedTokens: Math.round(totalWords * 1.33),
@@ -389,8 +383,57 @@ async function startServer() {
             return;
           }
         }
+      }
 
-        res.status(400).json({ error: 'Invalid YouTube URL or ID. Paste a YouTube link, direct subtitle URL, or transcript text.' });
+      // Branch G: Direct Text or Pasted Subtitles
+      if (detected.type === 'direct_text' && rawInput.length > 25 && (rawInput.includes(' ') || rawInput.includes('\n'))) {
+        const parsedSegments = parseSubtitlePayload(rawInput, true);
+        if (parsedSegments && parsedSegments.length > 0) {
+          const fullText = parsedSegments.map((s) => s.text).join(' ');
+          const totalWords = fullText.split(/\s+/).filter(Boolean).length;
+          const lastSeg = parsedSegments[parsedSegments.length - 1];
+          const durationSeconds = lastSeg ? lastSeg.start + lastSeg.duration : 0;
+          res.json({
+            ok: true,
+            metadata: {
+              videoId: '',
+              url: '',
+              title: customTitle || 'Pasted / Uploaded Transcript',
+              authorName: 'Direct Input',
+              authorUrl: '',
+              thumbnailUrl: '',
+              durationSeconds: Math.round(durationSeconds),
+              durationFormatted: formatTime(durationSeconds),
+              sourceType: 'direct_text',
+              totalSegments: parsedSegments.length,
+              totalWords,
+              estimatedTokens: Math.round(totalWords * 1.33),
+            },
+            segments: parsedSegments,
+            fullText,
+          });
+          return;
+        }
+      }
+
+      // Branch H: Web Article / Document Link
+      if (detected.type === 'web_article') {
+        const safe = await isSafePublicUrl(rawInput);
+        if (safe) {
+          try {
+            const result = await fetchWebArticleMetadataAndTranscript(rawInput, customTitle);
+            res.json({ ok: true, ...result });
+            return;
+          } catch (e: any) {
+            // fallback
+          }
+        }
+      }
+
+      const videoId = detected.type === 'youtube' ? (detected.id || extractVideoId(rawInput)) : extractVideoId(rawInput);
+
+      if (!videoId) {
+        res.status(400).json({ error: 'Unrecognized media URL or transcript. Provide a YouTube, Vimeo, Dailymotion, TED Talk, Podcast RSS link, direct audio/video file, or pasted transcript.' });
         return;
       }
 
@@ -467,6 +510,47 @@ async function startServer() {
 
   app.get('/api/transcript', handleTranscriptRequest);
   app.post('/api/transcript', handleTranscriptRequest);
+
+  // 1b. POST /api/transcribe-audio - Multimodal Gemini speech-to-text for uploaded audio / video files
+  app.post('/api/transcribe-audio', async (req: Request, res: Response) => {
+    try {
+      const { audioBase64, mimeType, filename } = req.body || {};
+      if (!audioBase64) {
+        res.status(400).json({ error: 'Please provide audioBase64 payload to transcribe.' });
+        return;
+      }
+      const result = await transcribeUploadedMedia(
+        audioBase64,
+        mimeType || 'audio/mp3',
+        filename || 'Uploaded Audio'
+      );
+      res.json({ ok: true, ...result });
+    } catch (err: any) {
+      console.error('Audio transcription error:', err);
+      res.status(500).json({ error: err?.message || 'Audio transcription failed.' });
+    }
+  });
+
+  // 1c. GET /api/podcast-episodes - Inspects podcast RSS feeds and returns episode roster
+  app.get('/api/podcast-episodes', async (req: Request, res: Response) => {
+    try {
+      const feedUrl = String(req.query.url || '').trim();
+      if (!feedUrl) {
+        res.status(400).json({ error: 'Please provide a podcast RSS feed URL.' });
+        return;
+      }
+      const data = await fetchPodcastRssMetadataAndTranscript(feedUrl, 0);
+      res.json({
+        ok: true,
+        title: data.metadata.title,
+        authorName: data.metadata.authorName,
+        thumbnailUrl: data.metadata.thumbnailUrl,
+        episodes: data.metadata.episodes || [],
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Failed to parse podcast feed.' });
+    }
+  });
 
   type ServerAIProvider =
     | 'gemini'

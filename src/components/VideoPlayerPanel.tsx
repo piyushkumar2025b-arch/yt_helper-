@@ -2,8 +2,6 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   Move,
   X,
-  Maximize2,
-  Minimize2,
   PanelLeft,
   LayoutTemplate,
   CornerUpLeft,
@@ -11,16 +9,20 @@ import {
   CornerDownLeft,
   CornerDownRight,
   Tv,
-  ExternalLink,
+  Play,
+  Pause,
+  Volume2,
+  VolumeX,
+  Radio,
+  Music,
+  Headphones,
+  Film,
 } from 'lucide-react';
 import { VideoMetadata, ThemeId } from '../types';
 import { APP_THEMES } from '../constants';
 
 export type VideoPlayerSize = 'sm' | 'md' | 'lg' | 'xl';
-export type VideoPlacementMode =
-  | 'floating'
-  | 'docked-top'
-  | 'sidebar';
+export type VideoPlacementMode = 'floating' | 'docked-top' | 'sidebar';
 export type FloatingCorner = 'bottom-right' | 'bottom-left' | 'top-right' | 'top-left' | 'custom';
 
 export const VIDEO_SIZE_PRESETS: Record<
@@ -52,7 +54,7 @@ export const VideoPlayerPanel: React.FC<VideoPlayerPanelProps> = ({
   activeTimestamp,
   seekTrigger = 0,
   onTimeUpdate,
-  currentTheme = 'midnight',
+  currentTheme = 'sepia',
   size = 'md',
   onChangeSize,
   placement = 'floating',
@@ -61,13 +63,15 @@ export const VideoPlayerPanel: React.FC<VideoPlayerPanelProps> = ({
   embeddedInSidebar = false,
 }) => {
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const isPlayerReadyRef = useRef<boolean>(false);
   const lastReportedSecRef = useRef<number>(-1);
   const lastHandledSeekTriggerRef = useRef<number>(seekTrigger);
-  const themeConfig = APP_THEMES[currentTheme] || APP_THEMES.midnight;
+  const themeConfig = APP_THEMES[currentTheme] || APP_THEMES.sepia;
 
-  // Custom width when user drags the resize handle or picks a size preset
+  // Custom width and corner snap state
   const [customWidth, setCustomWidth] = useState<number>(VIDEO_SIZE_PRESETS[size].widthPx);
   const [corner, setCorner] = useState<FloatingCorner>('bottom-right');
   const [position, setPosition] = useState<{ x: number; y: number }>(() => {
@@ -85,6 +89,13 @@ export const VideoPlayerPanel: React.FC<VideoPlayerPanelProps> = ({
   const dragOffsetRef = useRef<{ offsetX: number; offsetY: number }>({ offsetX: 0, offsetY: 0 });
   const resizeStartRef = useRef<{ startX: number; startWidth: number }>({ startX: 0, startWidth: 420 });
 
+  // Native Audio state
+  const [isPlayingAudio, setIsPlayingAudio] = useState(false);
+  const [audioCurrentTime, setAudioCurrentTime] = useState(0);
+  const [audioDuration, setAudioDuration] = useState(0);
+  const [audioPlaybackRate, setAudioPlaybackRate] = useState<number>(1);
+  const [isMuted, setIsMuted] = useState(false);
+
   // Sync preset width when `size` prop changes
   useEffect(() => {
     const presetW = VIDEO_SIZE_PRESETS[size]?.widthPx || 420;
@@ -94,13 +105,15 @@ export const VideoPlayerPanel: React.FC<VideoPlayerPanelProps> = ({
     }
   }, [size]);
 
-  // Reset player ready state when videoId changes
+  // Reset player ready state when media changes
   useEffect(() => {
     isPlayerReadyRef.current = false;
     lastReportedSecRef.current = -1;
-  }, [metadata?.videoId]);
+    setIsPlayingAudio(false);
+    setAudioCurrentTime(0);
+  }, [metadata?.videoId, metadata?.mediaUrl, metadata?.url]);
 
-  // Listen to YouTube IFrame API postMessage events for live playback time synchronization (M-11)
+  // Listen to YouTube IFrame postMessage events
   useEffect(() => {
     const ALLOWED_YT_HOSTS = new Set([
       'www.youtube.com',
@@ -119,14 +132,13 @@ export const VideoPlayerPanel: React.FC<VideoPlayerPanelProps> = ({
       if (iframeRef.current?.contentWindow && event.source !== iframeRef.current.contentWindow) {
         return;
       }
+
       try {
-        const data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
-        if (!data) return;
-        if (data.event === 'onReady' || data.event === 'initialDelivery' || data.event === 'infoDelivery') {
+        const payload = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
+        if (payload?.event === 'onReady') {
           isPlayerReadyRef.current = true;
-        }
-        if (data.event === 'infoDelivery' && data.info && typeof data.info.currentTime === 'number') {
-          const sec = Math.floor(data.info.currentTime);
+        } else if (payload?.event === 'infoDelivery' && payload.info?.currentTime !== undefined) {
+          const sec = Math.floor(payload.info.currentTime);
           if (sec !== lastReportedSecRef.current) {
             lastReportedSecRef.current = sec;
             onTimeUpdate?.(sec);
@@ -146,43 +158,66 @@ export const VideoPlayerPanel: React.FC<VideoPlayerPanelProps> = ({
     try {
       iframeRef.current.contentWindow.postMessage(
         JSON.stringify({ event: 'listening', id: 'opentranscript-yt' }),
-        'https://www.youtube.com'
+        '*'
       );
       iframeRef.current.contentWindow.postMessage(
         JSON.stringify({ event: 'command', func: 'addEventListener', args: ['onStateChange'] }),
-        'https://www.youtube.com'
+        '*'
       );
     } catch {
       // ignore
     }
   };
 
-  // Seek YouTube iframe only when seekTrigger explicitly increments (M-12)
+  // Seek media element or iframe when seekTrigger explicitly increments
   useEffect(() => {
     if (seekTrigger === lastHandledSeekTriggerRef.current) return;
     lastHandledSeekTriggerRef.current = seekTrigger;
 
-    if (seekTrigger > 0 && activeTimestamp !== null && iframeRef.current && metadata?.videoId) {
+    if (seekTrigger > 0 && activeTimestamp !== null) {
       const sec = Math.max(0, Math.floor(activeTimestamp));
       lastReportedSecRef.current = sec;
-      if (isPlayerReadyRef.current && iframeRef.current.contentWindow) {
+
+      // 1. Native HTML5 Audio
+      if (audioRef.current) {
+        audioRef.current.currentTime = sec;
+        audioRef.current.play().catch(() => {});
+        setIsPlayingAudio(true);
+        return;
+      }
+
+      // 2. Native HTML5 Video
+      if (videoRef.current) {
+        videoRef.current.currentTime = sec;
+        videoRef.current.play().catch(() => {});
+        return;
+      }
+
+      // 3. YouTube / Vimeo / Embed iframe
+      if (isPlayerReadyRef.current && iframeRef.current?.contentWindow) {
         try {
           iframeRef.current.contentWindow.postMessage(
             JSON.stringify({ event: 'command', func: 'seekTo', args: [sec, true] }),
-            'https://www.youtube.com'
+            '*'
           );
           iframeRef.current.contentWindow.postMessage(
             JSON.stringify({ event: 'command', func: 'playVideo', args: [] }),
-            'https://www.youtube.com'
+            '*'
           );
           return;
         } catch {
-          // fallback to src update
+          // fallback
         }
       }
-      iframeRef.current.src = `https://www.youtube.com/embed/${metadata.videoId}?enablejsapi=1&autoplay=1&start=${sec}&rel=0`;
+
+      if (iframeRef.current && metadata?.videoId) {
+        const sourceType = metadata.sourceType || 'youtube';
+        if (sourceType === 'youtube') {
+          iframeRef.current.src = `https://www.youtube.com/embed/${metadata.videoId}?enablejsapi=1&autoplay=1&start=${sec}&rel=0`;
+        }
+      }
     }
-  }, [seekTrigger, activeTimestamp, metadata?.videoId]);
+  }, [seekTrigger, activeTimestamp, metadata]);
 
   const snapToCorner = (targetCorner: FloatingCorner, widthToUse = customWidth) => {
     if (typeof window === 'undefined') return;
@@ -212,17 +247,20 @@ export const VideoPlayerPanel: React.FC<VideoPlayerPanelProps> = ({
     setPosition({ x: nextX, y: nextY });
   };
 
-  // Handle Free Dragging across the screen
+  // Dragging handler
   useEffect(() => {
     if (!isDragging) return;
 
     const handleMouseMove = (e: MouseEvent) => {
       const vw = window.innerWidth;
       const vh = window.innerHeight;
-      const nextX = Math.min(Math.max(8, e.clientX - dragOffsetRef.current.offsetX), Math.max(8, vw - 160));
-      const nextY = Math.min(Math.max(8, e.clientY - dragOffsetRef.current.offsetY), Math.max(8, vh - 90));
+      const playerH = Math.round((customWidth * 9) / 16) + 42;
+
+      const newX = Math.min(Math.max(8, e.clientX - dragOffsetRef.current.offsetX), vw - customWidth - 8);
+      const newY = Math.min(Math.max(50, e.clientY - dragOffsetRef.current.offsetY), vh - playerH - 8);
+
+      setPosition({ x: newX, y: newY });
       setCorner('custom');
-      setPosition({ x: nextX, y: nextY });
     };
 
     const handleMouseUp = () => {
@@ -235,16 +273,16 @@ export const VideoPlayerPanel: React.FC<VideoPlayerPanelProps> = ({
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [isDragging]);
+  }, [isDragging, customWidth]);
 
-  // Handle Smooth Corner Drag Resizing
+  // Resizing handler
   useEffect(() => {
     if (!isResizing) return;
 
     const handleMouseMove = (e: MouseEvent) => {
       const deltaX = e.clientX - resizeStartRef.current.startX;
-      const nextW = Math.min(Math.max(240, resizeStartRef.current.startWidth + deltaX), 1100);
-      setCustomWidth(nextW);
+      const newWidth = Math.min(Math.max(260, resizeStartRef.current.startWidth + deltaX), 980);
+      setCustomWidth(newWidth);
     };
 
     const handleMouseUp = () => {
@@ -259,7 +297,7 @@ export const VideoPlayerPanel: React.FC<VideoPlayerPanelProps> = ({
     };
   }, [isResizing]);
 
-  if (!metadata || !metadata.videoId) {
+  if (!metadata || (!metadata.videoId && !metadata.mediaUrl && !metadata.embedUrl)) {
     return null;
   }
 
@@ -273,7 +311,196 @@ export const VideoPlayerPanel: React.FC<VideoPlayerPanelProps> = ({
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const embedSrc = `https://www.youtube.com/embed/${metadata.videoId}?enablejsapi=1&rel=0`;
+  const sourceType = metadata.sourceType || 'youtube';
+  const isAudio =
+    sourceType === 'direct_audio' ||
+    sourceType === 'podcast_rss' ||
+    (Boolean(metadata.mediaUrl) && /\.(mp3|wav|m4a|ogg|aac|flac)(\?.*)?$/i.test(metadata.mediaUrl || ''));
+  const isDirectVideo =
+    sourceType === 'direct_video' ||
+    (Boolean(metadata.mediaUrl) && /\.(mp4|webm|mov)(\?.*)?$/i.test(metadata.mediaUrl || ''));
+
+  function resolveEmbedSrc(): string {
+    if (metadata?.embedUrl) return metadata.embedUrl;
+    if (sourceType === 'vimeo') {
+      return `https://player.vimeo.com/video/${metadata?.videoId}?autoplay=1`;
+    }
+    if (sourceType === 'dailymotion') {
+      return `https://www.dailymotion.com/embed/video/${metadata?.videoId}`;
+    }
+    if (sourceType === 'ted') {
+      return `https://embed.ted.com/talks/${metadata?.videoId}`;
+    }
+    if (sourceType === 'loom') {
+      return `https://www.loom.com/embed/${metadata?.videoId}`;
+    }
+    return `https://www.youtube.com/embed/${metadata?.videoId}?enablejsapi=1&rel=0`;
+  }
+
+  // Render Inner Player Media Content
+  const renderMediaContent = () => {
+    // 1. Audio Media (Podcast RSS, MP3/WAV/M4A, Uploaded Audio)
+    if (isAudio && metadata.mediaUrl) {
+      return (
+        <div className="w-full h-full flex flex-col justify-between p-4 bg-gradient-to-br from-slate-900 via-slate-950 to-indigo-950/60 text-slate-100 select-none">
+          <audio
+            ref={audioRef}
+            src={metadata.mediaUrl}
+            onTimeUpdate={(e) => {
+              const cur = Math.floor(e.currentTarget.currentTime);
+              setAudioCurrentTime(cur);
+              if (cur !== lastReportedSecRef.current) {
+                lastReportedSecRef.current = cur;
+                onTimeUpdate?.(cur);
+              }
+            }}
+            onLoadedMetadata={(e) => {
+              setAudioDuration(Math.floor(e.currentTarget.duration) || metadata.durationSeconds || 0);
+            }}
+            onPlay={() => setIsPlayingAudio(true)}
+            onPause={() => setIsPlayingAudio(false)}
+            onEnded={() => setIsPlayingAudio(false)}
+          />
+
+          {/* Top Info Banner */}
+          <div className="flex items-center gap-3 min-w-0">
+            {metadata.thumbnailUrl ? (
+              <img
+                src={metadata.thumbnailUrl}
+                alt={metadata.title}
+                className="w-14 h-14 rounded-lg object-cover shadow-md shrink-0 border border-slate-700/60"
+              />
+            ) : (
+              <div className="w-14 h-14 rounded-lg bg-indigo-600/30 border border-indigo-500/40 flex items-center justify-center shrink-0 text-indigo-400">
+                <Radio className="w-7 h-7" />
+              </div>
+            )}
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-1.5 text-[10px] uppercase font-bold tracking-wider text-indigo-400">
+                <Headphones className="w-3 h-3" />
+                <span>{sourceType === 'podcast_rss' ? 'Podcast Audio' : 'Audio Stream'}</span>
+              </div>
+              <h4 className="text-xs sm:text-sm font-semibold text-slate-100 truncate mt-0.5">
+                {metadata.title}
+              </h4>
+              <p className="text-[11px] text-slate-400 truncate">
+                {metadata.authorName || 'Audio Recording'}
+              </p>
+            </div>
+          </div>
+
+          {/* Scrubber Bar */}
+          <div className="space-y-1 my-2">
+            <input
+              type="range"
+              min={0}
+              max={audioDuration || metadata.durationSeconds || 100}
+              value={audioCurrentTime}
+              onChange={(e) => {
+                const targetSec = Number(e.target.value);
+                setAudioCurrentTime(targetSec);
+                if (audioRef.current) {
+                  audioRef.current.currentTime = targetSec;
+                }
+              }}
+              className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+            />
+            <div className="flex justify-between text-[10px] text-slate-400 font-mono tabular-nums">
+              <span>{formatSec(audioCurrentTime)}</span>
+              <span>{formatSec(audioDuration || metadata.durationSeconds || 0)}</span>
+            </div>
+          </div>
+
+          {/* Controls Bar */}
+          <div className="flex items-center justify-between pt-1">
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  if (!audioRef.current) return;
+                  if (isPlayingAudio) {
+                    audioRef.current.pause();
+                  } else {
+                    audioRef.current.play().catch(() => {});
+                  }
+                }}
+                className="w-9 h-9 rounded-full bg-indigo-600 hover:bg-indigo-500 text-white flex items-center justify-center shadow-lg transition-transform active:scale-95 cursor-pointer"
+                title={isPlayingAudio ? 'Pause Audio' : 'Play Audio'}
+              >
+                {isPlayingAudio ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 ml-0.5" />}
+              </button>
+
+              {/* Speed Buttons */}
+              <div className="flex items-center bg-slate-800/80 rounded p-0.5 text-[10px] font-bold text-slate-300">
+                {[1, 1.25, 1.5, 2].map((rate) => (
+                  <button
+                    key={rate}
+                    type="button"
+                    onClick={() => {
+                      setAudioPlaybackRate(rate);
+                      if (audioRef.current) audioRef.current.playbackRate = rate;
+                    }}
+                    className={`px-1.5 py-0.5 rounded cursor-pointer ${
+                      audioPlaybackRate === rate ? 'bg-indigo-600 text-white' : 'hover:text-white'
+                    }`}
+                  >
+                    {rate}x
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Mute button */}
+            <button
+              type="button"
+              onClick={() => {
+                if (!audioRef.current) return;
+                const nextMuted = !isMuted;
+                audioRef.current.muted = nextMuted;
+                setIsMuted(nextMuted);
+              }}
+              className="p-1.5 rounded text-slate-400 hover:text-white cursor-pointer"
+              title={isMuted ? 'Unmute' : 'Mute'}
+            >
+              {isMuted ? <VolumeX className="w-4 h-4 text-rose-400" /> : <Volume2 className="w-4 h-4" />}
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    // 2. Direct Video File (.mp4, .webm)
+    if (isDirectVideo && metadata.mediaUrl) {
+      return (
+        <video
+          ref={videoRef}
+          src={metadata.mediaUrl}
+          controls
+          onTimeUpdate={(e) => {
+            const sec = Math.floor(e.currentTarget.currentTime);
+            if (sec !== lastReportedSecRef.current) {
+              lastReportedSecRef.current = sec;
+              onTimeUpdate?.(sec);
+            }
+          }}
+          className="w-full h-full object-contain bg-black"
+        />
+      );
+    }
+
+    // 3. IFrame Video Embed (YouTube, Vimeo, Dailymotion, TED, Loom)
+    return (
+      <iframe
+        ref={iframeRef}
+        src={resolveEmbedSrc()}
+        onLoad={registerYouTubeListener}
+        title={metadata.title || 'Video Player'}
+        className="w-full h-full border-0"
+        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+        allowFullScreen
+      />
+    );
+  };
 
   // 1. Embedded inside Sidebar Mode
   if (embeddedInSidebar) {
@@ -281,7 +508,9 @@ export const VideoPlayerPanel: React.FC<VideoPlayerPanelProps> = ({
       <div className={`rounded-lg overflow-hidden border ${themeConfig.borderLight} bg-black/90 space-y-1.5 p-1.5`}>
         <div className="flex items-center justify-between px-1 text-[11px]">
           <div className="flex items-center gap-1.5 truncate">
-            <span className={`font-medium truncate ${themeConfig.textSecondary}`}>Sidebar Player</span>
+            <span className={`font-medium truncate ${themeConfig.textSecondary}`}>
+              {isAudio ? 'Audio Player' : 'Sidebar Player'}
+            </span>
             {activeTimestamp !== null && (
               <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-400 tabular-nums shrink-0">
                 {formatSec(activeTimestamp)}
@@ -321,22 +550,14 @@ export const VideoPlayerPanel: React.FC<VideoPlayerPanelProps> = ({
             )}
           </div>
         </div>
-        <div className="w-full overflow-hidden rounded bg-black aspect-video">
-          <iframe
-            ref={iframeRef}
-            src={embedSrc}
-            onLoad={registerYouTubeListener}
-            title={metadata.title || 'Video Player'}
-            className="w-full h-full border-0"
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-            allowFullScreen
-          />
+        <div className="w-full overflow-hidden rounded bg-black aspect-video relative">
+          {renderMediaContent()}
         </div>
       </div>
     );
   }
 
-  // 2. Docked Top of Main Workspace Mode (with 4 size presets)
+  // 2. Docked Top of Main Workspace Mode
   if (placement === 'docked-top') {
     return (
       <div
@@ -419,33 +640,26 @@ export const VideoPlayerPanel: React.FC<VideoPlayerPanelProps> = ({
 
         {/* Video Frame */}
         <div className="w-full bg-black aspect-video relative">
-          <iframe
-            ref={iframeRef}
-            src={embedSrc}
-            onLoad={registerYouTubeListener}
-            title={metadata.title || 'Video Player'}
-            className="w-full h-full border-0"
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-            allowFullScreen
-          />
+          {renderMediaContent()}
         </div>
       </div>
     );
   }
 
-  // 3. Floating Draggable & Multi-Size Player (Place anywhere on screen!)
+  // 3. Floating Draggable / Resizable Window Mode (Default)
   return (
     <div
       ref={containerRef}
       style={{
         width: `${customWidth}px`,
-        left: `${position.x}px`,
-        top: `${position.y}px`,
-        maxWidth: 'calc(100vw - 16px)',
+        transform: `translate3d(${position.x}px, ${position.y}px, 0)`,
+        position: 'fixed',
+        top: 0,
+        left: 0,
       }}
-      className={`fixed z-50 rounded-xl overflow-hidden border ${themeConfig.border} ${themeConfig.cardBg} shadow-2xl select-none`}
+      className={`z-50 rounded-xl overflow-hidden shadow-2xl border ${themeConfig.borderLight} ${themeConfig.cardBg} transition-shadow`}
     >
-      {/* Draggable Header Bar */}
+      {/* Draggable Title Bar */}
       <div
         onMouseDown={(e) => {
           if ((e.target as HTMLElement).closest('button')) return;
@@ -461,7 +675,7 @@ export const VideoPlayerPanel: React.FC<VideoPlayerPanelProps> = ({
         <div className="flex items-center gap-1.5 min-w-0">
           <Move className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
           <span className="text-[11px] font-semibold truncate">
-            {metadata.title || 'Video Player'}
+            {metadata.title || 'Media Player'}
           </span>
           {activeTimestamp !== null && (
             <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-400 tabular-nums shrink-0">
@@ -534,7 +748,7 @@ export const VideoPlayerPanel: React.FC<VideoPlayerPanelProps> = ({
             </button>
           </div>
 
-          {/* Dock to Top or Sidebar */}
+          {/* Placement Switchers */}
           {onChangePlacement && (
             <>
               <button
@@ -569,21 +783,12 @@ export const VideoPlayerPanel: React.FC<VideoPlayerPanelProps> = ({
         </div>
       </div>
 
-      {/* Video Player Area */}
+      {/* Media Player Area */}
       <div className="w-full bg-black aspect-video relative">
-        {/* Transparent overlay while actively dragging/resizing so mouse events don't get swallowed by the YouTube iframe */}
         {(isDragging || isResizing) && (
           <div className="absolute inset-0 z-20 bg-transparent cursor-move" />
         )}
-        <iframe
-          ref={iframeRef}
-          src={embedSrc}
-          onLoad={registerYouTubeListener}
-          title={metadata.title || 'Video Player'}
-          className="w-full h-full border-0"
-          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-          allowFullScreen
-        />
+        {renderMediaContent()}
 
         {/* Bottom-Right Drag-to-Resize Handle */}
         <div

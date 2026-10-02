@@ -86,8 +86,12 @@ interface SidebarMenuProps {
   onSaveCurrentToCloud?: () => void;
 }
 
-function isLikelyYouTubeUrlOrId(input: string): boolean {
-  return extractVideoId(input) !== null;
+function isLikelyMediaUrlOrId(input: string): boolean {
+  const trimmed = input.trim();
+  if (extractVideoId(trimmed) !== null) return true;
+  if (/^https?:\/\//i.test(trimmed)) return true;
+  if (/^[a-zA-Z0-9_-]{11}$/.test(trimmed)) return true;
+  return false;
 }
 
 export const SidebarMenu: React.FC<SidebarMenuProps> = ({
@@ -222,7 +226,7 @@ export const SidebarMenu: React.FC<SidebarMenuProps> = ({
     const trimmed = urlInput.trim();
     if (!trimmed || isLoading) return;
 
-    if (isLikelyYouTubeUrlOrId(trimmed)) {
+    if (isLikelyMediaUrlOrId(trimmed)) {
       onSubmitUrl(trimmed);
     } else {
       // User typed a search query in the URL box — switch to YouTube Search and execute
@@ -235,7 +239,7 @@ export const SidebarMenu: React.FC<SidebarMenuProps> = ({
   const handleSubmitYtSearch = (e: React.FormEvent) => {
     e.preventDefault();
     if (!ytQuery.trim() || isSearchingYt) return;
-    if (isLikelyYouTubeUrlOrId(ytQuery.trim())) {
+    if (isLikelyMediaUrlOrId(ytQuery.trim())) {
       onSubmitUrl(ytQuery.trim());
       return;
     }
@@ -343,17 +347,27 @@ export const SidebarMenu: React.FC<SidebarMenuProps> = ({
                     <span>Paste or upload transcript</span>
                   </button>
                   <div className="px-2 pt-1.5 pb-0.5 text-[10px] font-semibold uppercase tracking-wider opacity-50">
-                    Sample Videos
+                    Sample Media & Talks
                   </div>
                   {SAMPLE_VIDEOS.map((s) => (
                     <button
                       key={s.id}
                       type="button"
                       onClick={() => handleSelectSample(s)}
-                      className={`w-full flex items-center justify-between px-2 py-1 rounded text-[11px] ${themeConfig.textSecondary} hover:bg-slate-500/10 text-left transition-colors cursor-pointer truncate`}
+                      className={`w-full flex items-center justify-between px-2 py-1.5 rounded text-[11px] ${themeConfig.textSecondary} hover:bg-slate-500/10 text-left transition-colors cursor-pointer group`}
                     >
-                      <span className="truncate pr-2">{s.title.split('|')[0]}</span>
-                      <Play className="w-2.5 h-2.5 opacity-40 shrink-0" />
+                      <div className="min-w-0 pr-2">
+                        <div className="flex items-center gap-1.5">
+                          {s.badge && (
+                            <span className="text-[9px] font-bold uppercase tracking-wider px-1 py-0.2 rounded bg-indigo-500/15 text-indigo-400 shrink-0">
+                              {s.badge}
+                            </span>
+                          )}
+                          <span className="text-[10px] text-slate-400 font-mono tabular-nums shrink-0">{s.duration}</span>
+                        </div>
+                        <p className="truncate font-medium text-slate-200 group-hover:text-white mt-0.5">{s.title.split('|')[0]}</p>
+                      </div>
+                      <Play className="w-2.5 h-2.5 opacity-40 group-hover:opacity-100 group-hover:text-indigo-400 shrink-0 ml-1" />
                     </button>
                   ))}
                 </div>
@@ -368,7 +382,7 @@ export const SidebarMenu: React.FC<SidebarMenuProps> = ({
                   type="text"
                   value={urlInput}
                   onChange={(e) => setUrlInput(e.target.value)}
-                  placeholder="Paste YouTube link or search topic..."
+                  placeholder="Paste YouTube, Vimeo, TED, Podcast, Audio/Video URL..."
                   className={`w-full pl-2.5 pr-7 py-1.5 rounded text-[11px] bg-slate-500/10 ${themeConfig.textPrimary} placeholder:opacity-40 focus:outline-none focus:bg-slate-500/15`}
                   disabled={isLoading}
                 />
@@ -383,6 +397,16 @@ export const SidebarMenu: React.FC<SidebarMenuProps> = ({
                 )}
               </div>
 
+              {/* Supported Media Source Badges */}
+              <div className="flex items-center gap-1 overflow-x-auto no-scrollbar py-0.5 text-[9px] font-medium">
+                <span className="px-1.5 py-0.5 rounded bg-red-500/15 text-red-400 font-semibold shrink-0">YouTube</span>
+                <span className="px-1.5 py-0.5 rounded bg-cyan-500/15 text-cyan-400 font-semibold shrink-0">Vimeo</span>
+                <span className="px-1.5 py-0.5 rounded bg-rose-500/15 text-rose-400 font-semibold shrink-0">TED Talks</span>
+                <span className="px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-400 font-semibold shrink-0">Podcasts</span>
+                <span className="px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 font-semibold shrink-0">Audio/MP3</span>
+                <span className="px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 font-semibold shrink-0">Dailymotion</span>
+              </div>
+
               <button
                 type="submit"
                 disabled={!urlInput.trim() || isLoading}
@@ -391,12 +415,41 @@ export const SidebarMenu: React.FC<SidebarMenuProps> = ({
                 {isLoading ? (
                   <>
                     <Loader2 className="w-3 h-3 animate-spin" />
-                    <span>Reading video...</span>
+                    <span>Processing media...</span>
                   </>
                 ) : (
-                  <span>Summarize Video</span>
+                  <span>Transcribe &amp; Summarize</span>
                 )}
               </button>
+
+              {/* Podcast Episode Drawer if multiple episodes exist */}
+              {metadata?.sourceType === 'podcast_rss' && metadata?.episodes && metadata.episodes.length > 1 && (
+                <div className={`mt-2 p-2 rounded-lg border ${themeConfig.borderLight} bg-slate-500/5 space-y-1.5`}>
+                  <div className="flex items-center justify-between text-[10px] font-semibold text-indigo-400 uppercase tracking-wider">
+                    <span>Podcast Episodes ({metadata.episodes.length})</span>
+                  </div>
+                  <div className="max-h-36 overflow-y-auto space-y-1 pr-1">
+                    {metadata.episodes.map((ep, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => {
+                          if (metadata.podcastFeedUrl) {
+                            onSubmitUrl(`${metadata.podcastFeedUrl}#ep=${idx}`);
+                          }
+                        }}
+                        className={`w-full text-left p-1 rounded text-[10px] truncate block transition-colors cursor-pointer ${
+                          metadata.selectedEpisodeIndex === idx
+                            ? 'bg-indigo-600/30 text-indigo-300 font-semibold'
+                            : 'hover:bg-slate-500/10 text-slate-300'
+                        }`}
+                      >
+                        {ep.title}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </form>
           ) : (
             <div className="space-y-2">
