@@ -74,12 +74,8 @@ export function extractVideoId(urlOrId: string, allowBareId = true): string | nu
     }
   }
 
-  // Bare 11-character YouTube ID check: require standard 11-char base64url characters
-  // and reject all-lowercase plain words unless explicitly a valid ID pattern
+  // Bare 11-character YouTube ID check: accept standard 11-char base64url characters regardless of casing
   if (allowBareId && /^[a-zA-Z0-9_-]{11}$/.test(trimmed)) {
-    if (/^[a-z]{11}$/.test(trimmed) || /^[a-z]{10}[0-9]$/.test(trimmed)) {
-      return null;
-    }
     return trimmed;
   }
 

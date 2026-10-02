@@ -813,7 +813,8 @@ export async function deleteUserList(listId: string): Promise<void> {
     try {
       const q = query(collection(db, itemsPath), where('ownerId', '==', user.uid));
       const snap = await getDocs(q);
-      // Use Firestore writeBatch (up to 450 operations per batch) so items + parent list delete atomically
+      // Delete subcollection items in chunks of up to 450 operations per Firestore writeBatch,
+      // committing the parent list deletion in the final batch (single-batch atomic when <= 449 items).
       const docs = snap.docs;
       for (let i = 0; i < docs.length; i += 450) {
         const batch = writeBatch(db);

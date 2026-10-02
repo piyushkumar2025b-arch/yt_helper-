@@ -11,7 +11,7 @@ import {
   Volume2,
   Trash2,
 } from 'lucide-react';
-import { ChatMessage, ThemeId } from '../types';
+import { ChatMessage, ThemeId, TranscriptSegment } from '../types';
 import { APP_THEMES } from '../constants';
 import { speechService } from '../services/speechService';
 import { recordUserActivity } from '../services/listsService';
@@ -19,6 +19,9 @@ import { recordUserActivity } from '../services/listsService';
 interface AskVideoAIProps {
   transcript: string;
   videoTitle: string;
+  videoId?: string;
+  transcriptSegments?: TranscriptSegment[];
+  provider?: 'openrouter' | 'gemini';
   openRouterKey: string;
   selectedModelId: string;
   currentTheme?: ThemeId;
@@ -54,6 +57,9 @@ function parseTimeToSeconds(timeStr: string): number | null {
 export const AskVideoAI: React.FC<AskVideoAIProps> = ({
   transcript,
   videoTitle,
+  videoId = '',
+  transcriptSegments = [],
+  provider = 'gemini',
   openRouterKey,
   selectedModelId,
   currentTheme = 'midnight',
@@ -104,6 +110,9 @@ export const AskVideoAI: React.FC<AskVideoAIProps> = ({
           question: trimmed,
           transcript,
           title: videoTitle,
+          videoId,
+          segments: transcriptSegments,
+          provider,
           model: selectedModelId,
         }),
       });
@@ -118,26 +127,39 @@ export const AskVideoAI: React.FC<AskVideoAIProps> = ({
         query: trimmed,
         details: String(data.answer || '').replace(/[#*_>`]/g, '').slice(0, 260),
         videoTitle,
+        videoId,
       }).catch(() => {});
     } catch (err: any) {
-      const sentences = transcript
-        .replace(/\s+/g, ' ')
-        .split(/(?<=[.!?])\s+/)
-        .map((s) => s.trim())
-        .filter((s) => s.length > 20);
       const qWords = trimmed
         .toLowerCase()
         .replace(/[^a-z0-9\s]/g, '')
         .split(/\s+/)
         .filter((w) => w.length > 3);
-      const matches = sentences.filter((s) =>
-        qWords.some((w) => s.toLowerCase().includes(w))
-      );
-      const selected = (matches.length > 0 ? matches : sentences).slice(0, 5);
-      const fallbackReply = `*(Note: ${err?.message || 'AI service unavailable'} — showing matching transcript excerpts)*\n\nHere is what **"${videoTitle || 'this video'}"** shares in the transcript:\n\n${selected
-        .map((s) => `- ${s}`)
-        .join('\n\n')}`;
-      setMessages((prev) => [...prev, { role: 'assistant', content: fallbackReply }]);
+
+      if (transcriptSegments.length > 0) {
+        const matchingSegs = transcriptSegments.filter((seg) =>
+          qWords.some((w) => seg.text.toLowerCase().includes(w))
+        );
+        const selectedSegs = (matchingSegs.length > 0 ? matchingSegs : transcriptSegments).slice(0, 5);
+        const fallbackReply = `*(Note: ${err?.message || 'AI service unavailable'} — showing matching transcript excerpts)*\n\nHere is what **"${videoTitle || 'this video'}"** shares in the transcript:\n\n${selectedSegs
+          .map((seg) => (seg.formattedTime ? `- **[${seg.formattedTime}]** ${seg.text}` : `- ${seg.text}`))
+          .join('\n\n')}`;
+        setMessages((prev) => [...prev, { role: 'assistant', content: fallbackReply }]);
+      } else {
+        const sentences = transcript
+          .replace(/\s+/g, ' ')
+          .split(/(?<=[.!?])\s+/)
+          .map((s) => s.trim())
+          .filter((s) => s.length > 20);
+        const matches = sentences.filter((s) =>
+          qWords.some((w) => s.toLowerCase().includes(w))
+        );
+        const selected = (matches.length > 0 ? matches : sentences).slice(0, 5);
+        const fallbackReply = `*(Note: ${err?.message || 'AI service unavailable'} — showing matching transcript excerpts)*\n\nHere is what **"${videoTitle || 'this video'}"** shares in the transcript:\n\n${selected
+          .map((s) => `- ${s}`)
+          .join('\n\n')}`;
+        setMessages((prev) => [...prev, { role: 'assistant', content: fallbackReply }]);
+      }
     } finally {
       setIsAsking(false);
     }

@@ -42,6 +42,14 @@ export type SummaryType =
 
 export type DetailLevel = 'massive' | 'extensive' | 'balanced';
 
+export type AIProvider =
+  | 'gemini'
+  | 'openrouter'
+  | 'groq'
+  | 'openai'
+  | 'anthropic'
+  | 'local-extractive';
+
 export interface SummaryConfig {
   provider: 'openrouter' | 'gemini';
   openRouterKey: string;
@@ -55,7 +63,7 @@ export interface SummaryConfig {
 export interface SummaryResult {
   markdown: string;
   modelUsed: string;
-  providerUsed: 'openrouter' | 'gemini';
+  providerUsed: AIProvider;
   tokenUsage?: {
     promptTokens: number;
     completionTokens: number;

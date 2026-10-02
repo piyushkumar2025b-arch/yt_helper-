@@ -31,7 +31,36 @@ async function startServer() {
 
   app.use(express.json({ limit: '15mb' }));
 
-  // Same-origin / CORS & Rate Limiting protection on /api routes (C-06)
+  // Configure Express trust proxy ONLY when explicitly configured via TRUST_PROXY (BUG-011)
+  const trustProxyEnv = (process.env.TRUST_PROXY || '').trim();
+  if (trustProxyEnv === 'true' || trustProxyEnv === '1') {
+    app.set('trust proxy', 1);
+  } else if (trustProxyEnv && !isNaN(Number(trustProxyEnv))) {
+    app.set('trust proxy', Number(trustProxyEnv));
+  } else if (trustProxyEnv && trustProxyEnv !== 'false' && trustProxyEnv !== '0') {
+    app.set('trust proxy', trustProxyEnv);
+  } else {
+    app.set('trust proxy', false);
+  }
+
+  const allowedOrigins = new Set<string>(
+    [
+      process.env.APP_URL,
+      process.env.PUBLIC_ORIGIN,
+      ...(process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : []),
+    ]
+      .map((o) => (o || '').trim())
+      .filter(Boolean)
+      .map((o) => {
+        try {
+          return new URL(o).origin.toLowerCase();
+        } catch {
+          return o.toLowerCase();
+        }
+      })
+  );
+
+  // Same-origin / CORS & Rate Limiting protection on /api routes (C-06, BUG-011, BUG-015)
   const rateLimitWindowMs = 60_000;
   const maxRequestsPerMinute = 120;
   const maxLlmRequestsPerMinute = 25;
@@ -127,11 +156,27 @@ async function startServer() {
 
   app.use('/api', (req: Request, res: Response, next: NextFunction) => {
     const origin = req.headers.origin;
-    const host = req.headers.host;
-    if (origin && host) {
+    if (origin) {
       try {
-        const originHost = new URL(origin).host;
-        if (originHost !== host) {
+        const parsedOrigin = new URL(origin);
+        const originNormalized = parsedOrigin.origin.toLowerCase();
+        const originHost = parsedOrigin.host.toLowerCase();
+        const hostHeader = String(req.headers.host || '').trim().toLowerCase();
+        const forwardedHost = app.get('trust proxy')
+          ? String(req.headers['x-forwarded-host'] || '').split(',')[0].trim().toLowerCase()
+          : '';
+
+        const isAllowedOrigin =
+          allowedOrigins.has(originNormalized) ||
+          allowedOrigins.has(originHost) ||
+          (hostHeader && originHost === hostHeader) ||
+          (forwardedHost && originHost === forwardedHost) ||
+          originHost.endsWith('.run.app') ||
+          originHost.endsWith('.aistudio.google.com') ||
+          originHost === `localhost:${PORT}` ||
+          originHost === `127.0.0.1:${PORT}`;
+
+        if (!isAllowedOrigin) {
           res.status(403).json({ ok: false, error: 'Cross-origin API requests are not permitted.' });
           return;
         }
@@ -141,7 +186,8 @@ async function startServer() {
       }
     }
 
-    const clientIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket.remoteAddress || 'unknown';
+    // Use req.ip (which only honors X-Forwarded-For when trust proxy is explicitly configured)
+    const clientIp = req.ip || req.socket.remoteAddress || 'unknown';
     const now = Date.now();
     let entry = ipRequestCounts.get(clientIp);
     if (!entry || now > entry.resetAt) {
@@ -407,11 +453,69 @@ async function startServer() {
   app.get('/api/transcript', handleTranscriptRequest);
   app.post('/api/transcript', handleTranscriptRequest);
 
-  // In-memory cache & rate-limit tracker to preserve free-tier model quotas
-  const geminiResponseCache = new Map<string, { text: string; modelUsed: string; finishReason: string }>();
+  type ServerAIProvider =
+    | 'gemini'
+    | 'openrouter'
+    | 'groq'
+    | 'openai'
+    | 'anthropic'
+    | 'local-extractive';
+
+  // In-memory cache & rate-limit tracker to preserve free-tier model quotas (stores actual providerUsed - BUG-006)
+  const geminiResponseCache = new Map<
+    string,
+    { text: string; modelUsed: string; providerUsed: ServerAIProvider; finishReason: string }
+  >();
   const modelCooldownUntil = new Map<string, number>();
 
-  function buildDeterministicFallbackReport(promptText: string, explicitVideoId?: string): string {
+  function findSegmentTimestampForText(
+    snippet: string,
+    segments?: Array<{ start?: number; formattedTime?: string; text?: string }>
+  ): string | null {
+    if (!Array.isArray(segments) || segments.length === 0 || !snippet) return null;
+    const cleanSnippet = snippet.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!cleanSnippet) return null;
+    const words = cleanSnippet.split(' ').filter((w) => w.length > 3);
+
+    let bestSeg: { start?: number; formattedTime?: string; text?: string } | null = null;
+    let bestScore = 0;
+
+    for (const seg of segments) {
+      const segText = String(seg?.text || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+      if (!segText) continue;
+      if (segText.includes(cleanSnippet.slice(0, 32)) || cleanSnippet.includes(segText.slice(0, 32))) {
+        bestSeg = seg;
+        bestScore = 100;
+        break;
+      }
+      if (words.length > 0) {
+        let hits = 0;
+        for (const w of words) {
+          if (segText.includes(w)) hits++;
+        }
+        const score = hits / words.length;
+        if (score > bestScore && hits >= 2) {
+          bestScore = score;
+          bestSeg = seg;
+        }
+      }
+    }
+
+    if (!bestSeg) return null;
+    if (bestSeg.formattedTime && /^\d{1,2}:\d{2}(?::\d{2})?$/.test(bestSeg.formattedTime)) {
+      return bestSeg.formattedTime;
+    }
+    if (typeof bestSeg.start === 'number' && !isNaN(bestSeg.start) && bestSeg.start >= 0) {
+      return formatTime(bestSeg.start);
+    }
+    return null;
+  }
+
+  function buildDeterministicFallbackReport(
+    promptText: string,
+    explicitVideoId?: string,
+    segments?: Array<{ start?: number; formattedTime?: string; text?: string }>
+  ): string {
     const titleMatch = promptText.match(/Video Title:\s*"([^"]+)"/i) || promptText.match(/VIDEO TITLE:\s*"([^"]+)"/i);
     const title = titleMatch ? titleMatch[1] : 'Video Breakdown';
     const urlMatch = promptText.match(/Source URL:\s*([^\s\n]+)/i);
@@ -592,17 +696,21 @@ Derek Muller (Veritasium) explores the **Collatz Conjecture** (also known as the
     for (let i = 0; i < Math.min(6, Math.ceil(totalSentences / sectionSize)); i++) {
       const chunk = sentences.slice(i * sectionSize, (i + 1) * sectionSize);
       if (chunk.length === 0) continue;
-      const estMin = String(i * 3).padStart(2, '0');
       const lead = chunk[0].replace(/^\[?\d{1,2}:\d{2}\]?\s*/, '').slice(0, 75);
+      const realTs = findSegmentTimestampForText(chunk[0], segments);
+      const tsPrefix = realTs ? `[${realTs}] ` : '';
       chronologicalSections.push(
-        `- **[${estMin}:00] ${lead}...**:\n  ${chunk.join(' ')}`
+        `- **${tsPrefix}${lead}...**:\n  ${chunk.join(' ')}`
       );
     }
 
     const keyStatements = sentences
       .filter((s) => s.length > 60 && s.length < 240)
       .slice(0, 6)
-      .map((q, idx) => `> "${q}" — **[0${idx * 2}:15]**`)
+      .map((q) => {
+        const realTs = findSegmentTimestampForText(q, segments);
+        return realTs ? `> "${q}" — **[${realTs}]**` : `> "${q}"`;
+      })
       .join('\n\n');
 
     return `# ${title}
@@ -630,12 +738,34 @@ ${keyStatements || `> "${rawTranscript.slice(0, 300)}"`}
 - [**Wikipedia Reference Index for "${title}"**](https://en.wikipedia.org/wiki/Special:Search?search=${encodeURIComponent(title)})`;
   }
 
-  function buildHumanDeepDive(topic: string, transcript: string, title: string): string {
+  function buildHumanDeepDive(
+    topic: string,
+    transcript: string,
+    title: string,
+    segments?: Array<{ start?: number; formattedTime?: string; text?: string }>
+  ): string {
     const cleanTopic = topic.trim();
     const keywords = cleanTopic
       .toLowerCase()
       .split(/\s+/)
       .filter((w) => w.length > 2);
+
+    if (Array.isArray(segments) && segments.length > 0) {
+      const matchingSegs = segments.filter((seg) => {
+        const lower = String(seg.text || '').toLowerCase();
+        return lower.includes(cleanTopic.toLowerCase()) || keywords.some((k) => lower.includes(k));
+      });
+      const chosenSegs = (matchingSegs.length > 0 ? matchingSegs.slice(0, 10) : segments.slice(0, 8));
+      return `### What the Video Says About "${cleanTopic}"\n\nIn **${title || 'this video'}**, here is how **${cleanTopic}** comes up and why it matters in plain English:\n\n${chosenSegs
+        .map((seg) => {
+          const ts =
+            seg.formattedTime ||
+            (typeof seg.start === 'number' && !isNaN(seg.start) ? formatTime(seg.start) : null);
+          return ts ? `- **[${ts}]** ${seg.text}` : `- ${seg.text}`;
+        })
+        .join('\n\n')}\n\n**In short:** The speaker uses **${cleanTopic}** to ground the bigger message in real-world experience so you can apply the lesson directly.`;
+    }
+
     const sentences = transcript
       .replace(/\s+/g, ' ')
       .split(/(?<=[.!?])\s+/)
@@ -649,11 +779,20 @@ ${keyStatements || `> "${rawTranscript.slice(0, 300)}"`}
 
     const chosen = matching.length > 0 ? matching.slice(0, 10) : sentences.slice(0, 8);
     return `### What the Video Says About "${cleanTopic}"\n\nIn **${title || 'this video'}**, here is how **${cleanTopic}** comes up and why it matters in plain English:\n\n${chosen
-      .map((s, idx) => `- **[0${Math.min(9, idx * 2)}:${idx % 2 === 0 ? '15' : '45'}]** ${s}`)
+      .map((s) => {
+        const realTs = findSegmentTimestampForText(s, segments);
+        return realTs ? `- **[${realTs}]** ${s}` : `- ${s}`;
+      })
       .join('\n\n')}\n\n**In short:** The speaker uses **${cleanTopic}** to ground the bigger message in real-world experience so you can apply the lesson directly.`;
   }
 
-  function buildHumanChatAnswer(question: string, transcript: string, title: string, videoId?: string): string {
+  function buildHumanChatAnswer(
+    question: string,
+    transcript: string,
+    title: string,
+    videoId?: string,
+    segments?: Array<{ start?: number; formattedTime?: string; text?: string }>
+  ): string {
     const qLower = question.toLowerCase();
     if (videoId === 'UF8uR6Z6KLc') {
       if (qLower.includes('quote') || qLower.includes('memorable')) {
@@ -669,6 +808,36 @@ ${keyStatements || `> "${rawTranscript.slice(0, 300)}"`}
       .replace(/[^a-z0-9\s]/g, '')
       .split(/\s+/)
       .filter((w) => w.length > 3 && !stopWords.has(w));
+
+    if (Array.isArray(segments) && segments.length > 0) {
+      const scoredSegs = segments
+        .map((seg, idx) => {
+          const text = String(seg.text || '').trim();
+          const lower = text.toLowerCase();
+          const hits = keywords.reduce((acc, k) => acc + (lower.includes(k) ? 1 : 0), 0);
+          return { seg, idx, hits, text };
+        })
+        .filter((item) => item.text.length > 15 && item.hits > 0)
+        .sort((a, b) => b.hits - a.hits);
+
+      const bestSegs = (
+        scoredSegs.length > 0
+          ? scoredSegs.slice(0, 6)
+          : segments
+              .filter((s) => String(s.text || '').trim().length > 15)
+              .slice(0, 5)
+              .map((seg, idx) => ({ seg, idx, hits: 1, text: String(seg.text || '').trim() }))
+      ).sort((a, b) => a.idx - b.idx);
+
+      return `Here is what **"${title || 'the video'}"** shares about that in plain English:\n\n${bestSegs
+        .map((item) => {
+          const ts =
+            item.seg.formattedTime ||
+            (typeof item.seg.start === 'number' && !isNaN(item.seg.start) ? formatTime(item.seg.start) : null);
+          return ts ? `- **[${ts}]** ${item.text}` : `- ${item.text}`;
+        })
+        .join('\n\n')}`;
+    }
 
     const sentences = transcript
       .replace(/\s+/g, ' ')
@@ -690,26 +859,28 @@ ${keyStatements || `> "${rawTranscript.slice(0, 300)}"`}
 
     return `Here is what **"${title || 'the video'}"** shares about that in plain English:\n\n${best
       .map((item) => {
-        const approxSec = Math.max(5, Math.round((item.idx / Math.max(1, sentences.length)) * 840));
-        const mm = String(Math.floor(approxSec / 60)).padStart(2, '0');
-        const ss = String(approxSec % 60).padStart(2, '0');
-        return `- **[${mm}:${ss}]** ${item.s}`;
+        const realTs = findSegmentTimestampForText(item.s, segments);
+        return realTs ? `- **[${realTs}]** ${item.s}` : `- ${item.s}`;
       })
       .join('\n\n')}`;
   }
 
   // Resilient Gemini helper with automatic model fallback, cooldown tracking, and bounded caching
-  async function runGeminiWithFallback(promptText: string, maxTokens: number = 8192): Promise<{
+  async function runGeminiWithFallback(
+    promptText: string,
+    maxTokens: number = 8192,
+    segments?: Array<{ start?: number; formattedTime?: string; text?: string }>
+  ): Promise<{
     text: string;
     modelUsed: string;
-    providerUsed: 'gemini' | 'openrouter' | 'local-extractive';
+    providerUsed: ServerAIProvider;
     finishReason: string;
     warning?: string;
   }> {
     const cacheKey = `${maxTokens}:${promptText.slice(0, 400)}:${promptText.slice(-400)}:${promptText.length}`;
     const cached = geminiResponseCache.get(cacheKey);
     if (cached) {
-      return { ...cached, providerUsed: 'gemini' };
+      return { ...cached };
     }
 
     let lastError = '';
@@ -743,10 +914,15 @@ ${keyStatements || `> "${rawTranscript.slice(0, 300)}"`}
           });
           const candidate = response.candidates?.[0];
           const finishReason = candidate?.finishReason || 'STOP';
-          const result = { text: response.text || '', modelUsed: m, finishReason };
+          const result = {
+            text: response.text || '',
+            modelUsed: m,
+            providerUsed: 'gemini' as const,
+            finishReason,
+          };
           if (result.text) {
             setBoundedCache(geminiResponseCache, cacheKey, result, 150);
-            return { ...result, providerUsed: 'gemini' };
+            return result;
           }
         } catch (e: any) {
           lastError = String(e?.message || e || 'Gemini error');
@@ -786,9 +962,14 @@ ${keyStatements || `> "${rawTranscript.slice(0, 300)}"`}
           const groqData = (await groqRes.json()) as any;
           const text = groqData.choices?.[0]?.message?.content || '';
           if (text) {
-            const resObj = { text, modelUsed: 'groq/llama-3.3-70b-versatile', finishReason: 'STOP' };
+            const resObj = {
+              text,
+              modelUsed: 'groq/llama-3.3-70b-versatile',
+              providerUsed: 'groq' as const,
+              finishReason: 'STOP',
+            };
             setBoundedCache(geminiResponseCache, cacheKey, resObj, 150);
-            return { ...resObj, providerUsed: 'openrouter' };
+            return resObj;
           }
         }
       } catch {}
@@ -815,9 +996,14 @@ ${keyStatements || `> "${rawTranscript.slice(0, 300)}"`}
           const oaData = (await oaRes.json()) as any;
           const text = oaData.choices?.[0]?.message?.content || '';
           if (text) {
-            const resObj = { text, modelUsed: 'openai/gpt-4o-mini', finishReason: 'STOP' };
+            const resObj = {
+              text,
+              modelUsed: 'openai/gpt-4o-mini',
+              providerUsed: 'openai' as const,
+              finishReason: 'STOP',
+            };
             setBoundedCache(geminiResponseCache, cacheKey, resObj, 150);
-            return { ...resObj, providerUsed: 'openrouter' };
+            return resObj;
           }
         }
       } catch {}
@@ -844,16 +1030,21 @@ ${keyStatements || `> "${rawTranscript.slice(0, 300)}"`}
           const antData = (await antRes.json()) as any;
           const text = antData.content?.[0]?.text || '';
           if (text) {
-            const resObj = { text, modelUsed: 'anthropic/claude-3-5-sonnet', finishReason: 'STOP' };
+            const resObj = {
+              text,
+              modelUsed: 'anthropic/claude-3-5-sonnet',
+              providerUsed: 'anthropic' as const,
+              finishReason: 'STOP',
+            };
             setBoundedCache(geminiResponseCache, cacheKey, resObj, 150);
-            return { ...resObj, providerUsed: 'openrouter' };
+            return resObj;
           }
         }
       } catch {}
     }
 
     // When no LLM key is configured or all failed, attribute honestly as local-extractive (C-05)
-    const fallbackText = buildDeterministicFallbackReport(promptText);
+    const fallbackText = buildDeterministicFallbackReport(promptText, undefined, segments);
     return {
       text: fallbackText,
       modelUsed: 'extractive-fallback',
@@ -870,6 +1061,7 @@ ${keyStatements || `> "${rawTranscript.slice(0, 300)}"`}
     try {
       const {
         transcript,
+        segments,
         title,
         url,
         provider = 'openrouter',
@@ -1104,12 +1296,12 @@ ${transcript.slice(0, 200000)}
         }
 
         // Automatic fallback to Gemini / Deterministic Extractive Guide
-        const geminiResult = await runGeminiWithFallback(`${systemInstruction}\n\n${userPrompt}`, 8192);
+        const geminiResult = await runGeminiWithFallback(`${systemInstruction}\n\n${userPrompt}`, 8192, segments);
         const isTruncated = geminiResult.finishReason === 'MAX_TOKENS';
         const combinedWarning = [openRouterWarning, geminiResult.warning].filter(Boolean).join(' ');
         res.json({
           ok: true,
-          markdown: geminiResult.text || buildDeterministicFallbackReport(userPrompt),
+          markdown: geminiResult.text || buildDeterministicFallbackReport(userPrompt, undefined, segments),
           modelUsed: geminiResult.modelUsed,
           providerUsed: geminiResult.providerUsed,
           warning: combinedWarning || undefined,
@@ -1123,11 +1315,11 @@ ${transcript.slice(0, 200000)}
       }
 
       // Branch 2: Gemini (with honest provider attribution on fallback - C-05)
-      const geminiResult = await runGeminiWithFallback(`${systemInstruction}\n\n${userPrompt}`, 8192);
+      const geminiResult = await runGeminiWithFallback(`${systemInstruction}\n\n${userPrompt}`, 8192, segments);
       const isTruncated = geminiResult.finishReason === 'MAX_TOKENS';
       res.json({
         ok: true,
-        markdown: geminiResult.text || buildDeterministicFallbackReport(userPrompt),
+        markdown: geminiResult.text || buildDeterministicFallbackReport(userPrompt, undefined, segments),
         modelUsed: geminiResult.modelUsed,
         providerUsed: geminiResult.providerUsed,
         warning: geminiResult.warning,
@@ -1298,7 +1490,9 @@ If the last sentence above is unfinished, complete it immediately and then conti
       const {
         topic,
         transcript,
+        segments,
         title,
+        provider = 'gemini',
         openRouterKey,
         model = 'meta-llama/llama-3.3-70b-instruct:free',
       } = req.body;
@@ -1315,56 +1509,85 @@ TRANSCRIPT:
 ${transcript.slice(0, 150000)}
 `;
 
-      const { key: apiKey, isUserKey } = getOpenRouterRequestKey(req);
-      if (apiKey) {
-        const targetModel = resolveOpenRouterModel(model, isUserKey);
-        try {
-          const orRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${apiKey}`,
-              'HTTP-Referer': process.env.APP_URL || 'https://aistudio.google.com',
-              'X-Title': 'OpenTranscript AI',
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              model: targetModel,
-              messages: [{ role: 'user', content: prompt }],
-              max_tokens: 4096,
-              temperature: 0.3,
-            }),
-            signal: AbortSignal.timeout(45000),
-          });
+      let openRouterWarning = '';
+      if (provider === 'openrouter') {
+        const { key: apiKey, isUserKey } = getOpenRouterRequestKey(req);
+        if (apiKey) {
+          const targetModel = resolveOpenRouterModel(model, isUserKey);
+          try {
+            const orRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${apiKey}`,
+                'HTTP-Referer': process.env.APP_URL || 'https://aistudio.google.com',
+                'X-Title': 'OpenTranscript AI',
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                model: targetModel,
+                messages: [{ role: 'user', content: prompt }],
+                max_tokens: 4096,
+                temperature: 0.3,
+              }),
+              signal: AbortSignal.timeout(45000),
+            });
 
-          if (orRes.ok) {
-            const data = (await orRes.json()) as any;
-            const text = data.choices?.[0]?.message?.content || '';
-            if (text.trim()) {
-              res.json({ ok: true, expansion: text });
-              return;
+            if (orRes.ok) {
+              const data = (await orRes.json()) as any;
+              const text = data.choices?.[0]?.message?.content || '';
+              if (text.trim()) {
+                res.json({
+                  ok: true,
+                  expansion: text,
+                  providerUsed: 'openrouter',
+                  modelUsed: targetModel,
+                });
+                return;
+              }
+            } else {
+              const errBody = await orRes.text().catch(() => '');
+              openRouterWarning = `OpenRouter HTTP ${orRes.status}: ${errBody.slice(0, 140) || orRes.statusText}`;
             }
+          } catch (err: any) {
+            openRouterWarning = `OpenRouter error: ${err?.message || 'timeout'}`;
           }
-        } catch {}
+        } else {
+          openRouterWarning = 'No OpenRouter API key provided.';
+        }
       }
 
-      if (process.env.GEMINI_API_KEY) {
-        try {
-          const result = await runGeminiWithFallback(prompt, 4096);
-          if (result.text && !result.text.startsWith('# ')) {
-            res.json({ ok: true, expansion: result.text });
-            return;
-          }
-        } catch {}
-      }
+      try {
+        const result = await runGeminiWithFallback(prompt, 4096, segments);
+        if (result.text && result.providerUsed !== 'local-extractive' && !result.text.startsWith('# ')) {
+          res.json({
+            ok: true,
+            expansion: result.text,
+            providerUsed: result.providerUsed,
+            modelUsed: result.modelUsed,
+            warning: [openRouterWarning, result.warning].filter(Boolean).join(' ') || undefined,
+          });
+          return;
+        }
+      } catch {}
 
       res.json({
         ok: true,
-        expansion: buildHumanDeepDive(topic, transcript, title || 'Video'),
+        expansion: buildHumanDeepDive(topic, transcript, title || 'Video', segments),
+        providerUsed: 'local-extractive',
+        modelUsed: 'extractive-fallback',
+        warning: openRouterWarning || undefined,
       });
     } catch (e: any) {
       res.json({
         ok: true,
-        expansion: buildHumanDeepDive(req.body?.topic || 'Topic', req.body?.transcript || '', req.body?.title || 'Video'),
+        expansion: buildHumanDeepDive(
+          req.body?.topic || 'Topic',
+          req.body?.transcript || '',
+          req.body?.title || 'Video',
+          req.body?.segments
+        ),
+        providerUsed: 'local-extractive',
+        modelUsed: 'extractive-fallback',
       });
     }
   });
@@ -1375,7 +1598,10 @@ ${transcript.slice(0, 150000)}
       const {
         question,
         transcript,
+        segments,
         title,
+        videoId,
+        provider = 'gemini',
         openRouterKey,
         model = 'meta-llama/llama-3.3-70b-instruct:free',
       } = req.body;
@@ -1385,7 +1611,6 @@ ${transcript.slice(0, 150000)}
         return;
       }
 
-      const { key: apiKey, isUserKey } = getOpenRouterRequestKey(req);
       let chatWarning = '';
 
       const prompt = `You are a friendly, helpful person who just watched the YouTube video "${title || 'Video'}" and knows it inside out.
@@ -1398,54 +1623,63 @@ TRANSCRIPT:
 ${transcript.slice(0, 150000)}
 `;
 
-      if (apiKey) {
-        const targetModel = resolveOpenRouterModel(model, isUserKey);
-        try {
-          const orRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${apiKey}`,
-              'HTTP-Referer': process.env.APP_URL || 'https://aistudio.google.com',
-              'X-Title': 'OpenTranscript AI',
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              model: targetModel,
-              messages: [{ role: 'user', content: prompt }],
-              temperature: 0.3,
-            }),
-            signal: AbortSignal.timeout(45000),
-          });
+      if (provider === 'openrouter') {
+        const { key: apiKey, isUserKey } = getOpenRouterRequestKey(req);
+        if (apiKey) {
+          const targetModel = resolveOpenRouterModel(model, isUserKey);
+          try {
+            const orRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${apiKey}`,
+                'HTTP-Referer': process.env.APP_URL || 'https://aistudio.google.com',
+                'X-Title': 'OpenTranscript AI',
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                model: targetModel,
+                messages: [{ role: 'user', content: prompt }],
+                temperature: 0.3,
+              }),
+              signal: AbortSignal.timeout(45000),
+            });
 
-          if (orRes.ok) {
-            const data = (await orRes.json()) as any;
-            const ans = data.choices?.[0]?.message?.content || '';
-            if (ans.trim()) {
-              res.json({ answer: ans, providerUsed: 'openrouter', modelUsed: targetModel });
-              return;
+            if (orRes.ok) {
+              const data = (await orRes.json()) as any;
+              const ans = data.choices?.[0]?.message?.content || '';
+              if (ans.trim()) {
+                res.json({ answer: ans, providerUsed: 'openrouter', modelUsed: targetModel });
+                return;
+              }
+            } else {
+              const errBody = await orRes.text().catch(() => '');
+              chatWarning = `OpenRouter HTTP ${orRes.status}: ${errBody.slice(0, 140) || orRes.statusText}`;
             }
-          } else {
-            const errBody = await orRes.text().catch(() => '');
-            chatWarning = `OpenRouter HTTP ${orRes.status}: ${errBody.slice(0, 140) || orRes.statusText}`;
+          } catch (err: any) {
+            chatWarning = `OpenRouter error: ${err?.message || 'timeout'}`;
           }
-        } catch (err: any) {
-          chatWarning = `OpenRouter error: ${err?.message || 'timeout'}`;
+        } else {
+          chatWarning = 'No OpenRouter API key provided.';
         }
       }
 
-      if (process.env.GEMINI_API_KEY) {
-        try {
-          const result = await runGeminiWithFallback(prompt, 2048);
-          if (result.text && result.providerUsed === 'gemini') {
-            res.json({ answer: result.text, providerUsed: 'gemini', modelUsed: result.modelUsed, warning: chatWarning || undefined });
-            return;
-          }
-        } catch {}
-      }
+      try {
+        const result = await runGeminiWithFallback(prompt, 2048, segments);
+        if (result.text && result.providerUsed !== 'local-extractive') {
+          res.json({
+            answer: result.text,
+            providerUsed: result.providerUsed,
+            modelUsed: result.modelUsed,
+            warning: [chatWarning, result.warning].filter(Boolean).join(' ') || undefined,
+          });
+          return;
+        }
+      } catch {}
 
       res.json({
-        answer: buildHumanChatAnswer(question, transcript, title || 'Video', req.body?.videoId),
+        answer: buildHumanChatAnswer(question, transcript, title || 'Video', videoId, segments),
         providerUsed: 'local-extractive',
+        modelUsed: 'extractive-fallback',
         warning: chatWarning || undefined,
       });
     } catch (e: any) {

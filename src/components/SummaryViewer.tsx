@@ -60,6 +60,7 @@ interface SummaryViewerProps {
   customResources?: ExactVideoResource[];
   onRefreshCustomResources?: (resources: ExactVideoResource[]) => void;
   onAppendCustomMarkdown?: (snippet: string, noticeLabel?: string) => void;
+  provider?: 'openrouter' | 'gemini';
   openRouterKey?: string;
   selectedModelId?: string;
   currentTheme?: ThemeId;
@@ -300,6 +301,7 @@ export const SummaryViewer: React.FC<SummaryViewerProps> = ({
   customResources: externalCustomResources,
   onRefreshCustomResources,
   onAppendCustomMarkdown,
+  provider = 'gemini',
   openRouterKey = '',
   selectedModelId = 'meta-llama/llama-3.3-70b-instruct:free',
   currentTheme = 'midnight',
@@ -615,6 +617,9 @@ export const SummaryViewer: React.FC<SummaryViewerProps> = ({
           topic: topicToExpand,
           transcript: transcriptText,
           title: videoTitle,
+          videoId: videoMetadata?.videoId,
+          segments: transcriptSegments,
+          provider,
           model: selectedModelId,
         }),
       });
@@ -629,18 +634,38 @@ export const SummaryViewer: React.FC<SummaryViewerProps> = ({
       setExpandTopic('');
       setIsExpandModalOpen(false);
     } catch {
-      const sentences = (transcriptText || '')
-        .replace(/\s+/g, ' ')
-        .split(/(?<=[.!?])\s+/)
-        .filter((s) => s.length > 20)
-        .slice(0, 6);
-      const fallbackContent = `### Closer Look: ${topicToExpand}\n\n${sentences
-        .map((s, idx) => `- **[0${idx * 2}:15]** ${s}`)
-        .join('\n\n')}`;
-      setExpansionResults((prev) => [
-        ...prev,
-        { topic: topicToExpand, content: fallbackContent },
-      ]);
+      const keywords = topicToExpand
+        .toLowerCase()
+        .split(/\s+/)
+        .filter((w) => w.length > 2);
+
+      if (transcriptSegments.length > 0) {
+        const matchingSegs = transcriptSegments.filter((seg) => {
+          const lower = seg.text.toLowerCase();
+          return lower.includes(topicToExpand.toLowerCase()) || keywords.some((k) => lower.includes(k));
+        });
+        const chosenSegs = (matchingSegs.length > 0 ? matchingSegs : transcriptSegments).slice(0, 6);
+        const fallbackContent = `### Closer Look: ${topicToExpand}\n\n${chosenSegs
+          .map((seg) => (seg.formattedTime ? `- **[${seg.formattedTime}]** ${seg.text}` : `- ${seg.text}`))
+          .join('\n\n')}`;
+        setExpansionResults((prev) => [
+          ...prev,
+          { topic: topicToExpand, content: fallbackContent },
+        ]);
+      } else {
+        const sentences = (transcriptText || '')
+          .replace(/\s+/g, ' ')
+          .split(/(?<=[.!?])\s+/)
+          .filter((s) => s.length > 20)
+          .slice(0, 6);
+        const fallbackContent = `### Closer Look: ${topicToExpand}\n\n${sentences
+          .map((s) => `- ${s}`)
+          .join('\n\n')}`;
+        setExpansionResults((prev) => [
+          ...prev,
+          { topic: topicToExpand, content: fallbackContent },
+        ]);
+      }
       setExpandTopic('');
       setIsExpandModalOpen(false);
     } finally {

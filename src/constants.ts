@@ -2,6 +2,30 @@ import { OpenRouterModel, SampleVideo } from './types';
 
 export const OPENROUTER_MODELS: OpenRouterModel[] = [
   {
+    id: 'meta-llama/llama-3.3-70b-instruct:free',
+    name: 'Llama 3.3 70B (Free)',
+    contextLength: 128000,
+    isFree: true,
+    description: 'Zero-cost flagship open-source model through OpenRouter free tier.',
+    recommended: true,
+  },
+  {
+    id: 'deepseek/deepseek-r1:free',
+    name: 'DeepSeek R1 (Free)',
+    contextLength: 128000,
+    isFree: true,
+    description: 'Free tier reasoning model on OpenRouter.',
+    recommended: true,
+  },
+  {
+    id: 'google/gemini-2.0-flash-exp:free',
+    name: 'Gemini 2.0 Flash Exp (Free)',
+    contextLength: 1048576,
+    isFree: true,
+    description: 'Free experimental 1M context window model on OpenRouter.',
+    recommended: true,
+  },
+  {
     id: 'deepseek/deepseek-chat',
     name: 'DeepSeek V3 (Chat)',
     contextLength: 64000,
@@ -15,15 +39,6 @@ export const OPENROUTER_MODELS: OpenRouterModel[] = [
     contextLength: 128000,
     isFree: false,
     description: 'Flagship Meta open-weights model with 128k context window.',
-    recommended: true,
-  },
-  {
-    id: 'meta-llama/llama-3.3-70b-instruct:free',
-    name: 'Llama 3.3 70B (Free)',
-    contextLength: 128000,
-    isFree: true,
-    description: 'Zero-cost flagship open-source model through OpenRouter free tier.',
-    recommended: true,
   },
   {
     id: 'deepseek/deepseek-r1',
@@ -33,25 +48,11 @@ export const OPENROUTER_MODELS: OpenRouterModel[] = [
     description: 'Chain-of-thought reasoning powerhouse for exhaustive technical breakdowns.',
   },
   {
-    id: 'deepseek/deepseek-r1:free',
-    name: 'DeepSeek R1 (Free)',
-    contextLength: 128000,
-    isFree: true,
-    description: 'Free tier reasoning model on OpenRouter.',
-  },
-  {
     id: 'google/gemini-2.0-flash-001',
     name: 'Google Gemini 2.0 Flash',
     contextLength: 1048576,
     isFree: false,
     description: 'Massive 1,000,000 token context window. Ideal for 3+ hour podcasts & transcripts.',
-  },
-  {
-    id: 'google/gemini-2.0-flash-exp:free',
-    name: 'Gemini 2.0 Flash Exp (Free)',
-    contextLength: 1048576,
-    isFree: true,
-    description: 'Free experimental 1M context window model on OpenRouter.',
   },
   {
     id: 'anthropic/claude-3.5-sonnet',

@@ -47,7 +47,7 @@ import {
   parseAnyTranscriptFormat,
   formatTime,
 } from './utils/subtitleParser';
-import { OPENROUTER_MODELS, APP_THEMES } from './constants';
+import { OPENROUTER_MODELS, APP_THEMES, DEFAULT_SUMMARY_CONFIG } from './constants';
 import {
   VideoMetadata,
   TranscriptSegment,
@@ -221,7 +221,11 @@ export default function App() {
     return '';
   });
   const [selectedModel, setSelectedModel] = useState<OpenRouterModel>(() => {
-    return OPENROUTER_MODELS[0];
+    return (
+      OPENROUTER_MODELS.find((m) => m.id === DEFAULT_SUMMARY_CONFIG.model) ||
+      OPENROUTER_MODELS.find((m) => m.isFree) ||
+      OPENROUTER_MODELS[0]
+    );
   });
   const [provider, setProvider] = useState<'openrouter' | 'gemini'>(() => {
     const saved = typeof window !== 'undefined' ? localStorage.getItem('provider') : null;
@@ -407,7 +411,11 @@ export default function App() {
     throw lastError;
   };
 
-  const buildLocalSummaryFallback = (textToSummarize: string, title: string): string => {
+  const buildLocalSummaryFallback = (
+    textToSummarize: string,
+    title: string,
+    transcriptSegments: TranscriptSegment[] = []
+  ): string => {
     const sentences = textToSummarize
       .replace(/\s+/g, ' ')
       .split(/(?<=[.!?])\s+/)
@@ -415,13 +423,23 @@ export default function App() {
       .filter((s) => s.length > 20);
 
     const intro = sentences.slice(0, 4).join(' ');
-    const timeline = sentences
-      .slice(0, 12)
-      .map((s, idx) => {
-        const mm = String(idx * 2).padStart(2, '0');
-        return `- **[${mm}:15] Key Point ${idx + 1}**: ${s}`;
-      })
-      .join('\n\n');
+
+    let timeline = '';
+    if (transcriptSegments.length > 0) {
+      const step = Math.max(1, Math.floor(transcriptSegments.length / 10));
+      const sampledSegs = transcriptSegments.filter((_, i) => i % step === 0).slice(0, 10);
+      timeline = sampledSegs
+        .map((seg, idx) => {
+          const tsPrefix = seg.formattedTime ? `[${seg.formattedTime}] ` : '';
+          return `- **${tsPrefix}Key Point ${idx + 1}**: ${seg.text}`;
+        })
+        .join('\n\n');
+    } else {
+      timeline = sentences
+        .slice(0, 12)
+        .map((s, idx) => `- **Key Point ${idx + 1}**: ${s}`)
+        .join('\n\n');
+    }
 
     return `# ${title}\n\n## What This Video Is Really About\n${intro || textToSummarize.slice(0, 600)}\n\n---\n\n## Step-by-Step Story Walkthrough\n\n${timeline}\n\n---\n\n## Practical Takeaways\n1. **Core Insight**: ${sentences[0] || 'Review the transcript segments for verbatim details.'}\n2. **Summary Conclusion**: ${sentences[sentences.length - 1] || 'Synthesized directly from the provided transcript.'}`;
   };
@@ -564,7 +582,8 @@ export default function App() {
         transcriptData.metadata?.title || 'YouTube Video',
         urlToFetch,
         summaryType,
-        detailLevel
+        detailLevel,
+        transcriptData.segments || []
       );
     } catch (err: any) {
       if (err?.name === 'AbortError') return;
@@ -610,7 +629,8 @@ export default function App() {
     title: string,
     url: string,
     type: SummaryType,
-    depth: DetailLevel
+    depth: DetailLevel,
+    currentSegments: TranscriptSegment[] = segments
   ) => {
     if (!textToSummarize || !textToSummarize.trim()) return;
 
@@ -636,6 +656,7 @@ export default function App() {
           headers,
           body: JSON.stringify({
             transcript: textToSummarize,
+            segments: currentSegments,
             title,
             url,
             provider,
@@ -694,12 +715,12 @@ export default function App() {
       if (e?.name === 'AbortError') return;
       console.warn('Summary error:', e);
       setErrorMessage(e?.message || 'Summarization failed. Showing local extractive summary.');
-      const fallbackMd = buildLocalSummaryFallback(textToSummarize, title);
+      const fallbackMd = buildLocalSummaryFallback(textToSummarize, title, currentSegments);
       const preservedResearch = appendedResearchRef.current;
       setSummary({
         markdown: preservedResearch ? `${fallbackMd}\n\n${preservedResearch}` : fallbackMd,
         modelUsed: 'extractive-fallback',
-        providerUsed: 'gemini',
+        providerUsed: 'local-extractive',
         summaryType: type,
         detailLevel: depth,
         finishReason: 'stop',
@@ -1065,7 +1086,7 @@ export default function App() {
       videoTitle: meta.title,
     }).catch(() => {});
 
-    generateSummary(cleanFullText, meta.title, '', summaryType, detailLevel);
+    generateSummary(cleanFullText, meta.title, '', summaryType, detailLevel, generatedSegments);
   };
 
   // Do not auto-fetch or auto-summarize over the network on every page load (H-07)
@@ -1267,6 +1288,7 @@ export default function App() {
                 customResources={customResources}
                 onRefreshCustomResources={setCustomResources}
                 onAppendCustomMarkdown={handleAppendCustomMarkdown}
+                provider={provider}
                 openRouterKey={openRouterKey}
                 selectedModelId={selectedModel.id}
                 currentTheme={theme}
@@ -1357,6 +1379,9 @@ export default function App() {
               <AskVideoAI
                 transcript={fullText}
                 videoTitle={metadata?.title || 'YouTube Video'}
+                videoId={metadata?.videoId || ''}
+                transcriptSegments={segments}
+                provider={provider}
                 openRouterKey={openRouterKey}
                 selectedModelId={selectedModel.id}
                 currentTheme={theme}

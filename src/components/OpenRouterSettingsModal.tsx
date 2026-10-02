@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, ShieldCheck, Check, Sparkles, Cpu } from 'lucide-react';
+import { X, ShieldCheck, Check, Sparkles, Cpu, KeyRound, Eye, EyeOff, Trash2 } from 'lucide-react';
 import { OPENROUTER_MODELS } from '../constants';
 import { OpenRouterModel, DetailLevel } from '../types';
 
@@ -19,6 +19,8 @@ interface OpenRouterSettingsModalProps {
 export const OpenRouterSettingsModal: React.FC<OpenRouterSettingsModalProps> = ({
   isOpen,
   onClose,
+  openRouterKey,
+  onSaveKey,
   selectedModel,
   onSelectModel,
   detailLevel,
@@ -26,8 +28,14 @@ export const OpenRouterSettingsModal: React.FC<OpenRouterSettingsModalProps> = (
   provider,
   onSelectProvider,
 }) => {
+  const [draftKey, setDraftKey] = useState(openRouterKey || '');
+  const [showKey, setShowKey] = useState(false);
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [configuredKeys, setConfiguredKeys] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    setDraftKey(openRouterKey || '');
+  }, [openRouterKey, isOpen]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -44,6 +52,7 @@ export const OpenRouterSettingsModal: React.FC<OpenRouterSettingsModalProps> = (
   if (!isOpen) return null;
 
   const handleSave = () => {
+    onSaveKey(draftKey.trim());
     setSavedSuccess(true);
     setTimeout(() => {
       setSavedSuccess(false);
@@ -65,7 +74,7 @@ export const OpenRouterSettingsModal: React.FC<OpenRouterSettingsModalProps> = (
             <div>
               <h2 className="text-sm font-semibold text-slate-100">AI Model &amp; Connected Sources</h2>
               <p className="text-xs text-slate-400">
-                Choose how your summaries are written and check connected server APIs
+                Choose how your summaries are written and configure OpenRouter or server APIs
               </p>
             </div>
           </div>
@@ -117,50 +126,111 @@ export const OpenRouterSettingsModal: React.FC<OpenRouterSettingsModalProps> = (
                   {provider === 'openrouter' && <Check className="w-3.5 h-3.5 text-indigo-400" />}
                 </div>
                 <p className="text-[11px] text-slate-400">
-                  Llama 3.3, DeepSeek V3/R1, Claude 3.5, and Qwen via server environment.
+                  Llama 3.3, DeepSeek V3/R1, Claude 3.5, and Qwen via OpenRouter API.
                 </p>
               </button>
             </div>
           </div>
 
-          {/* OpenRouter Model Selection */}
+          {/* OpenRouter API Key Input & Model Selection */}
           {provider === 'openrouter' && (
-            <div className="space-y-2">
-              <label className="block text-xs font-semibold text-slate-300">
-                Preferred Model
-              </label>
-              <div className="space-y-1.5 max-h-[180px] overflow-y-auto pr-1">
-                {OPENROUTER_MODELS.map((m) => {
-                  const isSelected = selectedModel.id === m.id;
-                  return (
-                    <div
-                      key={m.id}
-                      onClick={() => onSelectModel(m)}
-                      className={`p-2.5 rounded-xl border text-left cursor-pointer transition-all ${
-                        isSelected
-                          ? 'border-indigo-500 bg-indigo-500/10'
-                          : 'border-slate-800 bg-slate-950/30 hover:border-slate-700'
-                      }`}
+            <div className="space-y-4">
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label htmlFor="openrouter-api-key-input" className="block text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+                    <KeyRound className="w-3.5 h-3.5 text-indigo-400" />
+                    <span>OpenRouter API Key</span>
+                  </label>
+                  <a
+                    href="https://openrouter.ai/keys"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-[11px] text-indigo-400 hover:text-indigo-300 underline"
+                  >
+                    Get key at openrouter.ai
+                  </a>
+                </div>
+                <div className="relative flex items-center gap-1.5">
+                  <div className="relative flex-1">
+                    <input
+                      id="openrouter-api-key-input"
+                      type={showKey ? 'text' : 'password'}
+                      value={draftKey}
+                      onChange={(e) => setDraftKey(e.target.value)}
+                      placeholder="sk-or-v1-... (stored in session only)"
+                      autoComplete="off"
+                      className="w-full px-3 py-2 pr-9 rounded-xl bg-slate-950/80 border border-slate-800 focus:border-indigo-500 text-xs text-slate-100 placeholder:text-slate-500 focus:outline-none font-mono"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowKey((prev) => !prev)}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 cursor-pointer"
+                      title={showKey ? 'Hide key' : 'Show key'}
                     >
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-medium text-slate-200">{m.name}</span>
-                          {m.isFree && (
-                            <span className="text-[10px] font-mono text-emerald-400 bg-emerald-500/10 px-1.5 py-0.2 rounded border border-emerald-500/20">
-                              Free Tier
-                            </span>
-                          )}
+                      {showKey ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
+                  {draftKey && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDraftKey('');
+                        onSaveKey('');
+                      }}
+                      className="px-2.5 py-2 rounded-xl border border-slate-800 bg-slate-950/60 text-slate-400 hover:text-rose-400 hover:border-rose-500/40 transition-colors cursor-pointer text-xs flex items-center gap-1"
+                      title="Clear saved OpenRouter key"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Clear</span>
+                    </button>
+                  )}
+                </div>
+                <p className="text-[10px] text-slate-400">
+                  Saved in your browser&apos;s <code className="text-slate-300">sessionStorage</code> and sent securely to the server proxy. Free-tier models also work with the server&apos;s configured OpenRouter key if set.
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <label className="block text-xs font-semibold text-slate-300">
+                  Preferred Model
+                </label>
+                <div className="space-y-1.5 max-h-[180px] overflow-y-auto pr-1">
+                  {OPENROUTER_MODELS.map((m) => {
+                    const isSelected = selectedModel.id === m.id;
+                    return (
+                      <div
+                        key={m.id}
+                        onClick={() => onSelectModel(m)}
+                        className={`p-2.5 rounded-xl border text-left cursor-pointer transition-all ${
+                          isSelected
+                            ? 'border-indigo-500 bg-indigo-500/10'
+                            : 'border-slate-800 bg-slate-950/30 hover:border-slate-700'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-medium text-slate-200">{m.name}</span>
+                            {m.isFree ? (
+                              <span className="text-[10px] font-mono text-emerald-400 bg-emerald-500/10 px-1.5 py-0.2 rounded border border-emerald-500/20">
+                                Free Tier
+                              </span>
+                            ) : (
+                              <span className="text-[10px] font-mono text-amber-400 bg-amber-500/10 px-1.5 py-0.2 rounded border border-amber-500/20">
+                                Paid (Requires Key)
+                              </span>
+                            )}
+                          </div>
+                          <span className="text-[10px] font-mono text-slate-400">
+                            {(m.contextLength / 1000).toFixed(0)}k context
+                          </span>
                         </div>
-                        <span className="text-[10px] font-mono text-slate-400">
-                          {(m.contextLength / 1000).toFixed(0)}k context
-                        </span>
+                        <p className="text-[11px] text-slate-400 mt-1 line-clamp-1">
+                          {m.description}
+                        </p>
                       </div>
-                      <p className="text-[11px] text-slate-400 mt-1 line-clamp-1">
-                        {m.description}
-                      </p>
-                    </div>
-                  );
-                })}
+                    );
+                  })}
+                </div>
               </div>
             </div>
           )}
