@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Header } from './components/Header';
 import { SidebarMenu } from './components/SidebarMenu';
 import { MenuSliderDivider } from './components/MenuSliderDivider';
@@ -16,11 +16,12 @@ import { CrucialKnowledgePanel } from './components/CrucialKnowledgePanel';
 import { ScrapedDataViewer } from './components/ScrapedDataViewer';
 import { SavedListsPanel } from './components/SavedListsPanel';
 import { TechWordsSearcherPanel } from './components/TechWordsSearcherPanel';
+import { ActivityHistoryPanel } from './components/ActivityHistoryPanel';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { auth, signInWithGoogle, signOutUser } from './firebase';
 import {
   addItemToUserList,
-  createUserList,
+  ensureCloudListExists,
   loadLocalLists,
   loadLocalSummaries,
   loadLocalCustomResources,
@@ -29,7 +30,7 @@ import {
   subscribeToCustomResources,
   saveSummaryToFirestore,
   syncLocalDataToFirestore,
-  getDefaultCloudListId,
+  recordUserActivity,
   SavedUserList,
   SavedCloudSummary,
 } from './services/listsService';
@@ -38,7 +39,14 @@ import {
   appendWebResultToSummary,
   appendImageResultToSummary,
   appendBatchToSummary,
+  escapeMarkdownInline,
 } from './services/termExtractionService';
+import {
+  isSafeHttpUrl,
+  extractVideoId,
+  parseAnyTranscriptFormat,
+  formatTime,
+} from './utils/subtitleParser';
 import { OPENROUTER_MODELS, APP_THEMES } from './constants';
 import {
   VideoMetadata,
@@ -85,7 +93,7 @@ export default function App() {
   const [summary, setSummary] = useState<SummaryResult | null>(null);
   const [activeTimestamp, setActiveTimestamp] = useState<number | null>(null);
   const [seekTrigger, setSeekTrigger] = useState<number>(0);
-  const [activeTab, setActiveTab] = useState<'summary' | 'transcript' | 'knowledge' | 'research' | 'scrape' | 'chat' | 'lists' | 'techwords'>('summary');
+  const [activeTab, setActiveTab] = useState<'summary' | 'transcript' | 'knowledge' | 'research' | 'scrape' | 'chat' | 'lists' | 'techwords' | 'history'>('summary');
   const [showVideo, setShowVideo] = useState<boolean>(false);
   const [videoSize, setVideoSize] = useState<VideoPlayerSize>(() => {
     const saved = typeof window !== 'undefined' ? localStorage.getItem('opentranscript_video_size') : null;
@@ -113,6 +121,7 @@ export default function App() {
     }
   };
   const [researchInitialQuery, setResearchInitialQuery] = useState<string>('');
+  const [techWordsInitialQuery, setTechWordsInitialQuery] = useState<string>('');
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [userLists, setUserLists] = useState<SavedUserList[]>([]);
   const [savedSummaries, setSavedSummaries] = useState<SavedCloudSummary[]>(() => loadLocalSummaries());
@@ -198,9 +207,18 @@ export default function App() {
   const [isSummarizing, setIsSummarizing] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  // Settings
+  // Settings (store OpenRouter key in sessionStorage and remove any legacy localStorage copy - C-08)
   const [openRouterKey, setOpenRouterKey] = useState<string>(() => {
-    return (typeof window !== 'undefined' && localStorage.getItem('openrouter_key')) || '';
+    if (typeof window === 'undefined') return '';
+    const sessionKey = sessionStorage.getItem('openrouter_key');
+    if (sessionKey) return sessionKey;
+    const legacyKey = localStorage.getItem('openrouter_key');
+    if (legacyKey) {
+      sessionStorage.setItem('openrouter_key', legacyKey);
+      localStorage.removeItem('openrouter_key');
+      return legacyKey;
+    }
+    return '';
   });
   const [selectedModel, setSelectedModel] = useState<OpenRouterModel>(() => {
     return OPENROUTER_MODELS[0];
@@ -208,12 +226,19 @@ export default function App() {
   const [provider, setProvider] = useState<'openrouter' | 'gemini'>(() => {
     const saved = typeof window !== 'undefined' ? localStorage.getItem('provider') : null;
     if (saved === 'openrouter' || saved === 'gemini') return saved;
-    const hasKey = typeof window !== 'undefined' && !!localStorage.getItem('openrouter_key');
+    const hasKey =
+      typeof window !== 'undefined' &&
+      Boolean(sessionStorage.getItem('openrouter_key') || localStorage.getItem('openrouter_key'));
     return hasKey ? 'openrouter' : 'gemini';
   });
   const [detailLevel, setDetailLevel] = useState<DetailLevel>('massive');
   const [summaryType, setSummaryType] = useState<SummaryType>('massive');
   const [isContinuing, setIsContinuing] = useState<boolean>(false);
+
+  const fetchAbortRef = useRef<AbortController | null>(null);
+  const summarizeAbortRef = useRef<AbortController | null>(null);
+  const regenDebounceRef = useRef<number | null>(null);
+  const appendedResearchRef = useRef<string>('');
 
   // Modals & Audio state
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
@@ -341,12 +366,16 @@ export default function App() {
   }, [isFullscreen, handleToggleFullscreen]);
 
   const handleSaveKey = (key: string) => {
-    setOpenRouterKey(key);
+    const trimmed = key.trim();
+    setOpenRouterKey(trimmed);
     if (typeof window !== 'undefined') {
-      localStorage.setItem('openrouter_key', key);
-      if (key.trim()) {
+      localStorage.removeItem('openrouter_key');
+      if (trimmed) {
+        sessionStorage.setItem('openrouter_key', trimmed);
         setProvider('openrouter');
         localStorage.setItem('provider', 'openrouter');
+      } else {
+        sessionStorage.removeItem('openrouter_key');
       }
     }
   };
@@ -358,15 +387,21 @@ export default function App() {
     }
   };
 
-  const fetchWithRetry = async (url: string, options?: RequestInit, retries = 3): Promise<Response> => {
+  const fetchWithRetry = async (url: string, options?: RequestInit, retries = 2): Promise<Response> => {
     let lastError: any;
     for (let attempt = 0; attempt < retries; attempt++) {
       try {
+        if (options?.signal?.aborted) {
+          throw new DOMException('Request aborted', 'AbortError');
+        }
         const res = await fetch(url, options);
         return res;
-      } catch (err) {
+      } catch (err: any) {
+        if (err?.name === 'AbortError') throw err;
         lastError = err;
-        await new Promise((r) => setTimeout(r, 600 * (attempt + 1)));
+        if (attempt < retries - 1) {
+          await new Promise((r) => setTimeout(r, 500 * (attempt + 1)));
+        }
       }
     }
     throw lastError;
@@ -384,34 +419,132 @@ export default function App() {
       .slice(0, 12)
       .map((s, idx) => {
         const mm = String(idx * 2).padStart(2, '0');
-        return `- **[${mm}:15] Key Moment ${idx + 1}**: ${s}`;
+        return `- **[${mm}:15] Key Point ${idx + 1}**: ${s}`;
       })
       .join('\n\n');
 
-    return `# ${title}\n\n## What This Video Is Really About\n${intro || textToSummarize.slice(0, 600)}\n\n---\n\n## Step-by-Step Story Walkthrough\n\n${timeline}\n\n---\n\n## Practical Takeaways\n1. **Follow your genuine curiosity**: Even unexpected detours often connect in meaningful ways later on.\n2. **Keep a beginner's mindset**: Treat setbacks as opportunities to experiment and build something better.\n\n---\n\n## Exact Resources, Books, Archives & Direct Sources Mentioned\n- **[12:48]** [**The Whole Earth Catalog (Stewart Brand, 1968–1974)**](https://archive.org/details/wholeearth) — Counterculture catalog with the farewell message *"Stay Hungry. Stay Foolish."*\n- **[02:15]** [**Reed College Calligraphy Program (Robert Palladino)**](https://www.reed.edu/reed-magazine/in-memoriam/obituaries/2016/robert-palladino-faculty.html) — The calligraphy course that inspired Macintosh proportional typography.\n- **[07:05]** [**NeXT Computer & Pixar Animation Studios**](https://en.wikipedia.org/wiki/NeXT) — Founded during Jobs's years away from Apple.\n- **[00:00]** [**Stanford 2005 Commencement Official Text Archive**](https://news.stanford.edu/stories/2005/06/youve-got-find-love-jobs-says)`;
+    return `# ${title}\n\n## What This Video Is Really About\n${intro || textToSummarize.slice(0, 600)}\n\n---\n\n## Step-by-Step Story Walkthrough\n\n${timeline}\n\n---\n\n## Practical Takeaways\n1. **Core Insight**: ${sentences[0] || 'Review the transcript segments for verbatim details.'}\n2. **Summary Conclusion**: ${sentences[sentences.length - 1] || 'Synthesized directly from the provided transcript.'}`;
   };
 
-  // Main Action: Fetch Transcript and Generate Summary (or restore saved summary)
-  const handleFetchAndSummarize = async (urlToFetch: string, savedMarkdown?: string) => {
+  // Main Action: Fetch Transcript and Generate Summary (or restore saved summary without fake Jobs fallback - C-02, H-09)
+  const handleFetchAndSummarize = async (urlToFetch: string, savedMarkdown?: string, savedTitle?: string) => {
     speechService.stop();
     setActiveTimestamp(null);
     setErrorMessage(null);
+
+    if (fetchAbortRef.current) {
+      fetchAbortRef.current.abort();
+    }
+    if (summarizeAbortRef.current) {
+      summarizeAbortRef.current.abort();
+    }
+    appendedResearchRef.current = '';
+
+    // If restoring a saved summary that has no video URL (e.g. manual upload), restore directly without network fetch
+    if (!urlToFetch.trim() && savedMarkdown && savedMarkdown.trim()) {
+      const words = savedMarkdown.split(/\s+/).filter(Boolean).length;
+      setCurrentUrl('');
+      setMetadata({
+        videoId: '',
+        url: '',
+        title: savedTitle || 'Saved Summary Document',
+        authorName: 'Saved Archive',
+        totalSegments: 0,
+        totalWords: words,
+        estimatedTokens: Math.round(words * 1.33),
+        durationFormatted: '00:00',
+      });
+      setSegments([]);
+      setFullText('');
+      setSummary({
+        markdown: savedMarkdown,
+        summaryType,
+        detailLevel,
+        providerUsed: provider,
+        modelUsed: selectedModel.id,
+        createdAt: new Date().toISOString(),
+        isTruncated: false,
+      });
+      return;
+    }
+
+    const controller = new AbortController();
+    fetchAbortRef.current = controller;
+
+    // If user pasted raw transcript text, SRT/VTT, or timestamped lines directly into the input box, process it immediately
+    const trimmedInput = urlToFetch.trim();
+    if (
+      !extractVideoId(trimmedInput) &&
+      !/^https?:\/\//i.test(trimmedInput) &&
+      trimmedInput.length > 40 &&
+      (/\s/.test(trimmedInput) || trimmedInput.includes('-->'))
+    ) {
+      const parsedSegs = parseAnyTranscriptFormat(trimmedInput, true);
+      if (parsedSegs.length > 0) {
+        const cleanFull = parsedSegs.map((s) => s.text).join(' ');
+        handleManualSubmit(cleanFull, savedTitle || 'Pasted Transcript', parsedSegs);
+        return;
+      }
+    }
+
     setIsLoading(true);
     setCurrentUrl(urlToFetch);
 
     try {
-      const transcriptRes = await fetchWithRetry(`/api/transcript?url=${encodeURIComponent(urlToFetch)}`);
-      const transcriptData = await transcriptRes.json();
+      const transcriptRes = await fetchWithRetry(
+        `/api/transcript?url=${encodeURIComponent(urlToFetch)}`,
+        { signal: controller.signal },
+        2
+      );
+      const transcriptData = await transcriptRes.json().catch(() => ({}));
+
+      if (controller.signal.aborted) return;
 
       if (!transcriptRes.ok) {
-        throw new Error(transcriptData.error || 'Could not load captions for this video.');
+        if (transcriptData?.metadata) {
+          setMetadata(transcriptData.metadata);
+        } else {
+          setMetadata(null);
+        }
+        setSegments([]);
+        setFullText('');
+        setIsLoading(false);
+
+        if (savedMarkdown && savedMarkdown.trim()) {
+          setSummary({
+            markdown: savedMarkdown,
+            summaryType,
+            detailLevel,
+            providerUsed: provider,
+            modelUsed: selectedModel.id,
+            createdAt: new Date().toISOString(),
+            isTruncated: false,
+          });
+          return;
+        }
+
+        setSummary(null);
+        setErrorMessage(
+          transcriptData.error ||
+            'Could not load captions for this video. Please check the URL or click "Paste text manually".'
+        );
+        return;
       }
 
       setMetadata(transcriptData.metadata);
       setSegments(transcriptData.segments || []);
       setFullText(transcriptData.fullText || '');
-
       setIsLoading(false);
+
+      recordUserActivity({
+        actionType: 'video',
+        title: transcriptData.metadata?.title || 'YouTube Video Loaded',
+        query: urlToFetch,
+        details: `${transcriptData.metadata?.authorName || 'YouTube'} · ${transcriptData.metadata?.durationFormatted || ''} · ${transcriptData.metadata?.totalWords || 0} words`,
+        videoId: transcriptData.metadata?.videoId || '',
+        videoUrl: urlToFetch,
+        videoTitle: transcriptData.metadata?.title || '',
+      }).catch(() => {});
 
       if (savedMarkdown && savedMarkdown.trim()) {
         setSummary({
@@ -434,46 +567,41 @@ export default function App() {
         detailLevel
       );
     } catch (err: any) {
-      console.warn('Transcript fetch fallback triggered:', err);
-      const fallbackSegments: TranscriptSegment[] = [
-        { start: 0, duration: 14, formattedTime: '00:00', text: 'I am honored to be with you today at your commencement from one of the finest universities in the world.' },
-        { start: 14, duration: 18, formattedTime: '00:14', text: 'Today I want to tell you three stories from my life. That is it. No big deal. Just three stories.' },
-        { start: 32, duration: 25, formattedTime: '00:32', text: 'The first story is about connecting the dots. I dropped out of Reed College after the first 6 months, but then stayed around as a drop-in for another 18 months before I really quit.' },
-        { start: 135, duration: 28, formattedTime: '02:15', text: 'Reed College at that time offered perhaps the best calligraphy instruction in the country. I decided to take a calligraphy class to learn how to do this.' },
-        { start: 225, duration: 26, formattedTime: '03:45', text: 'Ten years later, when we were designing the first Macintosh computer, it all came back to me. And we designed it all into the Mac.' },
-        { start: 275, duration: 24, formattedTime: '04:35', text: 'You cannot connect the dots looking forward; you can only connect them looking backwards. So you have to trust that the dots will somehow connect in your future.' },
-        { start: 324, duration: 26, formattedTime: '05:24', text: 'My second story is about love and loss. Woz and I started Apple in my parents garage when I was 20. In 10 years Apple had grown into a $2 billion company.' },
-        { start: 425, duration: 25, formattedTime: '07:05', text: 'Getting fired from Apple was the best thing that could have ever happened to me. The heaviness of being successful was replaced by the lightness of being a beginner again.' },
-        { start: 502, duration: 24, formattedTime: '08:22', text: 'Your work is going to fill a large part of your life, and the only way to be truly satisfied is to do what you believe is great work.' },
-        { start: 545, duration: 25, formattedTime: '09:05', text: 'My third story is about death. Remembering that I will be dead soon is the most important tool I have ever encountered to help me make the big choices in life.' },
-        { start: 775, duration: 25, formattedTime: '12:55', text: 'Your time is limited, so do not waste it living someone elses life. Do not let the noise of others opinions drown out your own inner voice.' },
-        { start: 852, duration: 20, formattedTime: '14:12', text: 'Stay Hungry. Stay Foolish. And I have always wished that for myself. And now, as you graduate to begin anew, I wish that for you.' },
-      ];
-      const fallbackText = fallbackSegments.map((s) => s.text).join(' ');
-      const fallbackTitle = "Steve Jobs' 2005 Stanford Commencement Address";
-      setMetadata({
-        videoId: 'UF8uR6Z6KLc',
-        url: urlToFetch || 'https://www.youtube.com/watch?v=UF8uR6Z6KLc',
-        title: fallbackTitle,
-        authorName: 'Stanford',
-        totalSegments: fallbackSegments.length,
-        totalWords: fallbackText.split(/\s+/).length,
-        estimatedTokens: 350,
-        durationFormatted: '15:04',
-      });
-      setSegments(fallbackSegments);
-      setFullText(fallbackText);
+      if (err?.name === 'AbortError') return;
+      console.warn('Transcript fetch error:', err);
       setIsLoading(false);
       setIsSummarizing(false);
-      setSummary({
-        markdown: savedMarkdown && savedMarkdown.trim() ? savedMarkdown : buildLocalSummaryFallback(fallbackText, fallbackTitle),
-        modelUsed: 'human-synthesis-fallback',
-        providerUsed: 'gemini',
-        summaryType,
-        detailLevel,
-        createdAt: new Date().toISOString(),
-        isTruncated: false,
-      });
+      setSegments([]);
+      setFullText('');
+
+      if (savedMarkdown && savedMarkdown.trim()) {
+        setMetadata({
+          videoId: '',
+          url: urlToFetch,
+          title: savedTitle || 'Saved Video Summary',
+          authorName: 'Saved Archive',
+          totalSegments: 0,
+          totalWords: savedMarkdown.split(/\s+/).filter(Boolean).length,
+          estimatedTokens: Math.round(savedMarkdown.split(/\s+/).filter(Boolean).length * 1.33),
+          durationFormatted: '00:00',
+        });
+        setSummary({
+          markdown: savedMarkdown,
+          summaryType,
+          detailLevel,
+          providerUsed: provider,
+          modelUsed: selectedModel.id,
+          createdAt: new Date().toISOString(),
+          isTruncated: false,
+        });
+        return;
+      }
+
+      setMetadata(null);
+      setSummary(null);
+      setErrorMessage(
+        err?.message || 'Unable to fetch video transcript. Please verify the YouTube URL or paste the transcript manually.'
+      );
     }
   };
 
@@ -484,32 +612,58 @@ export default function App() {
     type: SummaryType,
     depth: DetailLevel
   ) => {
+    if (!textToSummarize || !textToSummarize.trim()) return;
+
+    if (summarizeAbortRef.current) {
+      summarizeAbortRef.current.abort();
+    }
+    const controller = new AbortController();
+    summarizeAbortRef.current = controller;
+
     setIsSummarizing(true);
     setErrorMessage(null);
 
     try {
-      const res = await fetchWithRetry('/api/summarize', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          transcript: textToSummarize,
-          title,
-          url,
-          provider,
-          openRouterKey,
-          model: selectedModel.id,
-          summaryType: type,
-          detailLevel: depth,
-        }),
-      });
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (openRouterKey.trim()) {
+        headers['X-OpenRouter-Key'] = openRouterKey.trim();
+      }
 
-      const data = await res.json();
+      const res = await fetchWithRetry(
+        '/api/summarize',
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            transcript: textToSummarize,
+            title,
+            url,
+            provider,
+            model: selectedModel.id,
+            summaryType: type,
+            detailLevel: depth,
+          }),
+          signal: controller.signal,
+        },
+        1
+      );
+
+      const data = await res.json().catch(() => ({}));
+      if (controller.signal.aborted) return;
+
       if (!res.ok) {
         throw new Error(data.error || 'Failed to synthesize summary.');
       }
 
+      const baseMarkdown = String(data.markdown || '');
+      const preservedResearch = appendedResearchRef.current;
+      const finalMarkdown =
+        preservedResearch && !baseMarkdown.includes(preservedResearch.trim())
+          ? `${baseMarkdown}\n\n${preservedResearch}`
+          : baseMarkdown;
+
       const result: SummaryResult = {
-        markdown: data.markdown,
+        markdown: finalMarkdown,
         modelUsed: data.modelUsed,
         providerUsed: data.providerUsed,
         tokenUsage: data.tokenUsage,
@@ -521,12 +675,30 @@ export default function App() {
         createdAt: data.createdAt || new Date().toISOString(),
       };
 
+      if (data.warning) {
+        setAppendNotice(data.warning);
+        setTimeout(() => setAppendNotice(null), 5000);
+      }
+
       setSummary(result);
+      recordUserActivity({
+        actionType: 'summary',
+        title: `Summary Generated: ${title}`,
+        query: `${type} (${depth})`,
+        details: finalMarkdown.replace(/[#*_>`]/g, '').slice(0, 240),
+        videoId: extractVideoId(url) || metadata?.videoId || '',
+        videoUrl: url,
+        videoTitle: title,
+      }).catch(() => {});
     } catch (e: any) {
-      console.warn('Summary fallback triggered:', e);
+      if (e?.name === 'AbortError') return;
+      console.warn('Summary error:', e);
+      setErrorMessage(e?.message || 'Summarization failed. Showing local extractive summary.');
+      const fallbackMd = buildLocalSummaryFallback(textToSummarize, title);
+      const preservedResearch = appendedResearchRef.current;
       setSummary({
-        markdown: buildLocalSummaryFallback(textToSummarize, title),
-        modelUsed: 'human-synthesis-fallback',
+        markdown: preservedResearch ? `${fallbackMd}\n\n${preservedResearch}` : fallbackMd,
+        modelUsed: 'extractive-fallback',
         providerUsed: 'gemini',
         summaryType: type,
         detailLevel: depth,
@@ -536,15 +708,26 @@ export default function App() {
         createdAt: new Date().toISOString(),
       });
     } finally {
-      setIsSummarizing(false);
+      if (summarizeAbortRef.current === controller) {
+        setIsSummarizing(false);
+      }
     }
+  };
+
+  const scheduleRegenerate = (nextType: SummaryType, nextDepth: DetailLevel) => {
+    if (regenDebounceRef.current) {
+      window.clearTimeout(regenDebounceRef.current);
+    }
+    regenDebounceRef.current = window.setTimeout(() => {
+      if (fullText && metadata) {
+        generateSummary(fullText, metadata.title, metadata.url, nextType, nextDepth);
+      }
+    }, 350);
   };
 
   const handleRegenerate = (type: SummaryType) => {
     setSummaryType(type);
-    if (fullText && metadata) {
-      generateSummary(fullText, metadata.title, metadata.url, type, detailLevel);
-    }
+    scheduleRegenerate(type, detailLevel);
   };
 
   const handleContinueSummary = async () => {
@@ -553,23 +736,31 @@ export default function App() {
     setErrorMessage(null);
 
     try {
-      const res = await fetchWithRetry('/api/continue-summary', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          previousMarkdown: summary.markdown,
-          transcript: fullText,
-          title: metadata?.title || 'Video',
-          provider: summary.providerUsed || (openRouterKey ? 'openrouter' : 'gemini'),
-          openRouterKey,
-          model: selectedModel.id,
-          summaryType,
-          detailLevel,
-          continuationCount: summary.continuationCount || 0,
-        }),
-      });
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (openRouterKey.trim()) {
+        headers['X-OpenRouter-Key'] = openRouterKey.trim();
+      }
 
-      const data = await res.json();
+      const res = await fetchWithRetry(
+        '/api/continue-summary',
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            previousMarkdown: summary.markdown,
+            transcript: fullText,
+            title: metadata?.title || 'Video',
+            provider: summary.providerUsed || (openRouterKey ? 'openrouter' : 'gemini'),
+            model: selectedModel.id,
+            summaryType,
+            detailLevel,
+            continuationCount: summary.continuationCount || 0,
+          }),
+        },
+        1
+      );
+
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         throw new Error(data.error || 'Failed to continue summary.');
       }
@@ -583,17 +774,16 @@ export default function App() {
         lastContinuationText: data.continuation,
       });
     } catch (e: any) {
-      console.warn('Continue summary fallback triggered:', e);
-      const extraNotes = `\n\n## Additional Notes & Reflections\n\n${buildLocalSummaryFallback(fullText.slice(-1500), 'Continued Walkthrough')}`;
-      setSummary({
-        ...summary,
-        markdown: `${summary.markdown}${extraNotes}`,
-        isTruncated: false,
-        finishReason: 'stop',
-        continuationCount: (summary.continuationCount || 0) + 1,
-      });
+      console.warn('Continue summary error:', e);
+      setErrorMessage(e?.message || 'Could not continue summary.');
     } finally {
       setIsContinuing(false);
+    }
+  };
+
+  const recordAppendedSnippet = (prevMd: string, nextMd: string) => {
+    if (nextMd.length > prevMd.length && nextMd.startsWith(prevMd)) {
+      appendedResearchRef.current += nextMd.slice(prevMd.length);
     }
   };
 
@@ -604,6 +794,7 @@ export default function App() {
       return;
     }
     const updatedMarkdown = appendWebResultToSummary(summary.markdown, result);
+    recordAppendedSnippet(summary.markdown, updatedMarkdown);
     setSummary({ ...summary, markdown: updatedMarkdown });
     setAppendNotice(`Appended "${result.title}" to summary`);
     setTimeout(() => setAppendNotice(null), 3500);
@@ -616,6 +807,7 @@ export default function App() {
       return;
     }
     const updatedMarkdown = appendImageResultToSummary(summary.markdown, image);
+    recordAppendedSnippet(summary.markdown, updatedMarkdown);
     setSummary({ ...summary, markdown: updatedMarkdown });
     setAppendNotice(`Appended "${image.title}" image to summary`);
     setTimeout(() => setAppendNotice(null), 3500);
@@ -627,9 +819,11 @@ export default function App() {
       setTimeout(() => setAppendNotice(null), 3000);
       return;
     }
+    if (!isSafeHttpUrl(item.url)) return;
     const dateStr = item.publishedAt ? ` (${new Date(item.publishedAt).toLocaleDateString()})` : '';
-    const citation = `\n\n> **${item.title}** — *${item.source}${dateStr}*\n> "${item.snippet}"\n> [Read Full Article →](${item.url})\n`;
+    const citation = `\n\n> **${escapeMarkdownInline(item.title)}** — *${escapeMarkdownInline(item.source)}${dateStr}*\n> "${escapeMarkdownInline(item.snippet)}"\n> [Read Full Article →](${item.url})\n`;
     const updatedMarkdown = summary.markdown + citation;
+    recordAppendedSnippet(summary.markdown, updatedMarkdown);
     setSummary({ ...summary, markdown: updatedMarkdown });
     setAppendNotice(`Appended news article "${item.title.slice(0, 30)}..." to summary.`);
     setTimeout(() => setAppendNotice(null), 4000);
@@ -641,10 +835,12 @@ export default function App() {
       setTimeout(() => setAppendNotice(null), 3000);
       return;
     }
-    const authorsStr = book.authors?.length ? book.authors.join(', ') : 'Unknown Author';
-    const yearStr = book.publishedDate ? ` (${book.publishedDate.slice(0, 4)})` : '';
-    const citation = `\n\n### [${book.title}](${book.infoLink}) — *${authorsStr}${yearStr}*\n> ${book.description || 'Published reference volume.'}\n`;
+    const safeLink = isSafeHttpUrl(book.infoLink) ? book.infoLink : 'https://books.google.com';
+    const authorsStr = book.authors?.length ? escapeMarkdownInline(book.authors.join(', ')) : 'Unknown Author';
+    const yearStr = book.publishedDate ? ` (${escapeMarkdownInline(book.publishedDate.slice(0, 4))})` : '';
+    const citation = `\n\n### [${escapeMarkdownInline(book.title)}](${safeLink}) — *${authorsStr}${yearStr}*\n> ${escapeMarkdownInline(book.description || 'Published reference volume.')}\n`;
     const updatedMarkdown = summary.markdown + citation;
+    recordAppendedSnippet(summary.markdown, updatedMarkdown);
     setSummary({ ...summary, markdown: updatedMarkdown });
     setAppendNotice(`Appended book "${book.title.slice(0, 30)}..." to summary.`);
     setTimeout(() => setAppendNotice(null), 4000);
@@ -656,11 +852,13 @@ export default function App() {
       setTimeout(() => setAppendNotice(null), 3000);
       return;
     }
-    const authorsStr = paper.authors?.length ? paper.authors.join(', ') : 'Research Author';
+    const safeUrl = isSafeHttpUrl(paper.url) ? paper.url : 'https://scholar.google.com';
+    const authorsStr = paper.authors?.length ? escapeMarkdownInline(paper.authors.join(', ')) : 'Research Author';
     const yearStr = paper.year ? ` (${paper.year})` : '';
     const citeStr = paper.citationCount !== undefined ? ` — ${paper.citationCount} citations` : '';
-    const citation = `\n\n### [${paper.title}](${paper.url}) — *${authorsStr}${yearStr}, ${paper.source}${citeStr}*\n> ${paper.abstract || 'Peer-reviewed academic publication.'}\n`;
+    const citation = `\n\n### [${escapeMarkdownInline(paper.title)}](${safeUrl}) — *${authorsStr}${yearStr}, ${escapeMarkdownInline(paper.source)}${citeStr}*\n> ${escapeMarkdownInline(paper.abstract || 'Peer-reviewed academic publication.')}\n`;
     const updatedMarkdown = summary.markdown + citation;
+    recordAppendedSnippet(summary.markdown, updatedMarkdown);
     setSummary({ ...summary, markdown: updatedMarkdown });
     setAppendNotice(`Appended paper "${paper.title.slice(0, 30)}..." to summary.`);
     setTimeout(() => setAppendNotice(null), 4000);
@@ -673,6 +871,7 @@ export default function App() {
       return;
     }
     const updatedMarkdown = summary.markdown + snippet;
+    recordAppendedSnippet(summary.markdown, updatedMarkdown);
     setSummary({ ...summary, markdown: updatedMarkdown });
     setAppendNotice(noticeLabel || 'Appended resource to summary document.');
     setTimeout(() => setAppendNotice(null), 4000);
@@ -694,26 +893,30 @@ export default function App() {
     if (papers.length > 0) {
       updatedMarkdown += `\n\n### Peer-Reviewed Academic Papers & Preprints\n\n`;
       for (const p of papers) {
-        const authorsStr = p.authors?.length ? p.authors.join(', ') : 'Research Author';
+        if (!isSafeHttpUrl(p.url)) continue;
+        const authorsStr = p.authors?.length ? escapeMarkdownInline(p.authors.join(', ')) : 'Research Author';
         const yearStr = p.year ? ` (${p.year})` : '';
-        updatedMarkdown += `* **[${p.title}](${p.url})** — *${authorsStr}${yearStr} [${p.source}]*\n  * ${p.abstract || 'Peer-reviewed publication.'}\n`;
+        updatedMarkdown += `* **[${escapeMarkdownInline(p.title)}](${p.url})** — *${authorsStr}${yearStr} [${escapeMarkdownInline(p.source)}]*\n  * ${escapeMarkdownInline(p.abstract || 'Peer-reviewed publication.')}\n`;
       }
     }
     if (books.length > 0) {
       updatedMarkdown += `\n\n### Published Books & Literature (Google Books)\n\n`;
       for (const b of books) {
-        const authorsStr = b.authors?.length ? b.authors.join(', ') : 'Unknown Author';
-        const yearStr = b.publishedDate ? ` (${b.publishedDate.slice(0, 4)})` : '';
-        updatedMarkdown += `* **[${b.title}](${b.infoLink})** — *${authorsStr}${yearStr}*\n  * ${b.description}\n`;
+        const safeLink = isSafeHttpUrl(b.infoLink) ? b.infoLink : 'https://books.google.com';
+        const authorsStr = b.authors?.length ? escapeMarkdownInline(b.authors.join(', ')) : 'Unknown Author';
+        const yearStr = b.publishedDate ? ` (${escapeMarkdownInline(b.publishedDate.slice(0, 4))})` : '';
+        updatedMarkdown += `* **[${escapeMarkdownInline(b.title)}](${safeLink})** — *${authorsStr}${yearStr}*\n  * ${escapeMarkdownInline(b.description)}\n`;
       }
     }
     if (newsResults.length > 0) {
       updatedMarkdown += `\n\n### Relevant News & Media Coverage\n\n`;
       for (const n of newsResults) {
+        if (!isSafeHttpUrl(n.url)) continue;
         const dateStr = n.publishedAt ? ` (${new Date(n.publishedAt).toLocaleDateString()})` : '';
-        updatedMarkdown += `* **[${n.title}](${n.url})** — *${n.source}${dateStr}*\n  * ${n.snippet}\n`;
+        updatedMarkdown += `* **[${escapeMarkdownInline(n.title)}](${n.url})** — *${escapeMarkdownInline(n.source)}${dateStr}*\n  * ${escapeMarkdownInline(n.snippet)}\n`;
       }
     }
+    recordAppendedSnippet(summary.markdown, updatedMarkdown);
     setSummary({ ...summary, markdown: updatedMarkdown });
     setAppendNotice(
       `Appended research batch (${papers.length} papers, ${books.length} books, ${webResults.length} web, ${newsResults.length} news, ${images.length} figures)`
@@ -725,13 +928,17 @@ export default function App() {
     if (currentUser) {
       const validRemote = userLists.find((l) => l.ownerId === currentUser.uid && l.id !== 'list_default_favorites');
       if (validRemote) return validRemote;
-      const created = await createUserList(
-        'My Favorite Video Summaries',
-        'Videos, summaries, and big lessons I want to keep.',
-        'favorites',
-        getDefaultCloudListId(currentUser.uid)
-      );
-      setUserLists((prev) => [created, ...prev]);
+      const listId = await ensureCloudListExists(currentUser.uid);
+      const created: SavedUserList = {
+        id: listId,
+        ownerId: currentUser.uid,
+        name: 'My Favorite Video Summaries',
+        description: 'Videos, summaries, and big lessons I want to keep.',
+        category: 'favorites',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      setUserLists((prev) => (prev.some((l) => l.id === created.id) ? prev : [created, ...prev]));
       return created;
     }
     const local = userLists[0] || loadLocalLists()[0];
@@ -753,17 +960,30 @@ export default function App() {
         return;
       }
       await addItemToUserList(targetList.id, item);
+      recordUserActivity({
+        actionType: 'artifact',
+        title: `Saved ${item.itemType}: ${item.title}`,
+        query: item.title,
+        details: item.subtitle || (item.content ? item.content.slice(0, 200) : ''),
+        videoId: metadata?.videoId || '',
+        videoUrl: item.url || currentUrl,
+        videoTitle: metadata?.title || '',
+      }).catch(() => {});
       setAppendNotice(
         `Saved "${item.title.slice(0, 42)}" to Artifacts Folder${currentUser ? ' (Synced to Firebase)' : ''}`
       );
       setTimeout(() => setAppendNotice(null), 4000);
-    } catch {
-      setActiveTab('lists');
+    } catch (err: any) {
+      setErrorMessage(err?.message || 'Failed to save item to list.');
     }
   };
 
   const handleQuickSaveCurrentVideo = async () => {
     if (!metadata) return;
+    if (!summary?.markdown?.trim()) {
+      setErrorMessage('Please generate a summary first before saving it to your library.');
+      return;
+    }
     try {
       await saveSummaryToFirestore({
         videoId: metadata.videoId || '',
@@ -771,7 +991,7 @@ export default function App() {
         videoTitle: metadata.title || 'YouTube Video Summary',
         authorName: metadata.authorName || 'YouTube Channel',
         summaryType,
-        markdown: summary?.markdown || fullText || 'Summary',
+        markdown: summary.markdown,
       });
       if (!currentUser) {
         setSavedSummaries(loadLocalSummaries());
@@ -783,7 +1003,7 @@ export default function App() {
           title: metadata.title || 'YouTube Video Summary',
           url: currentUrl || metadata.url || '',
           subtitle: metadata.authorName || 'YouTube Channel',
-          content: summary?.markdown || fullText || '',
+          content: summary.markdown,
           notes: '',
         });
       }
@@ -793,8 +1013,8 @@ export default function App() {
           : `Saved "${metadata.title}" to "${targetList?.name || 'Saved Lists'}" (Sign in to sync to Firebase)`
       );
       setTimeout(() => setAppendNotice(null), 4000);
-    } catch {
-      setActiveTab('lists');
+    } catch (err: any) {
+      setErrorMessage(err?.message || 'Failed to save summary.');
     }
   };
 
@@ -807,23 +1027,18 @@ export default function App() {
   };
 
   const handleManualSubmit = (text: string, title: string, customSegments?: TranscriptSegment[]) => {
-    const totalWords = text.split(/\s+/).filter(Boolean).length;
-    const estTokens = Math.round(totalWords * 1.33);
-
+    setErrorMessage(null);
     const generatedSegments: TranscriptSegment[] =
       customSegments && customSegments.length > 0
         ? customSegments
-        : text
-            .split(/(?<=[.?!])\s+/)
-            .filter(Boolean)
-            .map((sentence, idx) => ({
-              start: idx * 4,
-              duration: 4,
-              text: sentence.trim(),
-              formattedTime: `${Math.floor((idx * 4) / 60)
-                .toString()
-                .padStart(2, '0')}:${((idx * 4) % 60).toString().padStart(2, '0')}`,
-            }));
+        : parseAnyTranscriptFormat(text, true);
+
+    const cleanFullText =
+      generatedSegments.length > 0 ? generatedSegments.map((s) => s.text).join(' ') : text;
+    const totalWords = cleanFullText.split(/\s+/).filter(Boolean).length;
+    const estTokens = Math.round(totalWords * 1.33);
+    const lastSeg = generatedSegments[generatedSegments.length - 1];
+    const durationSec = lastSeg ? lastSeg.start + lastSeg.duration : generatedSegments.length * 4;
 
     const meta: VideoMetadata = {
       videoId: '',
@@ -833,19 +1048,27 @@ export default function App() {
       totalSegments: generatedSegments.length,
       totalWords,
       estimatedTokens: estTokens,
-      durationFormatted: `${Math.floor((generatedSegments.length * 4) / 60)}m`,
+      durationSeconds: Math.round(durationSec),
+      durationFormatted: formatTime(durationSec),
     };
 
     setMetadata(meta);
     setSegments(generatedSegments);
-    setFullText(text);
+    setFullText(cleanFullText);
+    appendedResearchRef.current = '';
 
-    generateSummary(text, meta.title, '', summaryType, detailLevel);
+    recordUserActivity({
+      actionType: 'transcript',
+      title: `Imported Transcript: ${meta.title}`,
+      query: meta.title,
+      details: `${generatedSegments.length} segments · ${totalWords} words (${meta.durationFormatted})`,
+      videoTitle: meta.title,
+    }).catch(() => {});
+
+    generateSummary(cleanFullText, meta.title, '', summaryType, detailLevel);
   };
 
-  useEffect(() => {
-    handleFetchAndSummarize('https://www.youtube.com/watch?v=UF8uR6Z6KLc');
-  }, []);
+  // Do not auto-fetch or auto-summarize over the network on every page load (H-07)
 
   const themeConfig = APP_THEMES[theme] || APP_THEMES.midnight;
 
@@ -907,16 +1130,12 @@ export default function App() {
               summaryType={summaryType}
               onChangeSummaryType={(type) => {
                 setSummaryType(type);
-                if (fullText && metadata) {
-                  generateSummary(fullText, metadata.title, metadata.url, type, detailLevel);
-                }
+                scheduleRegenerate(type, detailLevel);
               }}
               detailLevel={detailLevel}
               onChangeDetailLevel={(lvl) => {
                 setDetailLevel(lvl);
-                if (fullText && metadata) {
-                  generateSummary(fullText, metadata.title, metadata.url, summaryType, lvl);
-                }
+                scheduleRegenerate(summaryType, lvl);
               }}
               selectedModel={selectedModel}
               provider={provider}
@@ -1177,6 +1396,31 @@ export default function App() {
                 onSaveToList={handleSaveItemToList}
                 onOpenArtifacts={() => setActiveTab('lists')}
                 onSeekToTimestamp={handleSeekToTimestamp}
+                initialSearchQuery={techWordsInitialQuery}
+              />
+            )}
+
+            {activeTab === 'history' && (
+              <ActivityHistoryPanel
+                currentTheme={theme}
+                user={currentUser}
+                onSignIn={handleSignInWithGoogle}
+                onOpenVideoUrl={(url) => {
+                  setActiveTab('summary');
+                  handleFetchAndSummarize(url);
+                }}
+                onOpenResearchQuery={(q) => {
+                  setResearchInitialQuery(q);
+                  setActiveTab('research');
+                }}
+                onOpenWordLookup={(q) => {
+                  setTechWordsInitialQuery(q);
+                  setActiveTab('techwords');
+                }}
+                onOpenTechWordLookup={(q) => {
+                  setTechWordsInitialQuery(q);
+                  setActiveTab('techwords');
+                }}
               />
             )}
           </div>
@@ -1246,6 +1490,7 @@ export default function App() {
         isOpen={isManualModalOpen}
         onClose={() => setIsManualModalOpen(false)}
         onSubmitManual={handleManualSubmit}
+        onSubmitUrl={handleFetchAndSummarize}
       />
     </div>
   );

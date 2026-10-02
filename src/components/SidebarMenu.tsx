@@ -25,9 +25,10 @@ import {
   LogIn,
   LogOut,
   Plus,
+  Calendar,
 } from 'lucide-react';
 import { User } from 'firebase/auth';
-import { SavedCloudSummary } from '../services/listsService';
+import { SavedCloudSummary, recordUserActivity } from '../services/listsService';
 import {
   VideoMetadata,
   SummaryType,
@@ -44,13 +45,14 @@ import {
   VideoPlacementMode,
   VIDEO_SIZE_PRESETS,
 } from './VideoPlayerPanel';
+import { extractVideoId } from '../utils/subtitleParser';
 
 interface SidebarMenuProps {
   isOpen: boolean;
   onClose: () => void;
   width: number;
   currentUrl: string;
-  onSubmitUrl: (url: string, savedMarkdown?: string) => void;
+  onSubmitUrl: (url: string, savedMarkdown?: string, savedTitle?: string) => void;
   isLoading: boolean;
   onOpenManualModal: () => void;
   metadata: VideoMetadata | null;
@@ -63,8 +65,8 @@ interface SidebarMenuProps {
   onChangeVideoSize?: (size: VideoPlayerSize) => void;
   videoPlacement?: VideoPlacementMode;
   onChangeVideoPlacement?: (mode: VideoPlacementMode) => void;
-  activeTab: 'summary' | 'transcript' | 'knowledge' | 'research' | 'scrape' | 'chat' | 'lists' | 'techwords';
-  onSelectTab: (tab: 'summary' | 'transcript' | 'knowledge' | 'research' | 'scrape' | 'chat' | 'lists' | 'techwords') => void;
+  activeTab: 'summary' | 'transcript' | 'knowledge' | 'research' | 'scrape' | 'chat' | 'lists' | 'techwords' | 'history';
+  onSelectTab: (tab: 'summary' | 'transcript' | 'knowledge' | 'research' | 'scrape' | 'chat' | 'lists' | 'techwords' | 'history') => void;
   summaryType: SummaryType;
   onChangeSummaryType: (type: SummaryType) => void;
   detailLevel: DetailLevel;
@@ -85,10 +87,7 @@ interface SidebarMenuProps {
 }
 
 function isLikelyYouTubeUrlOrId(input: string): boolean {
-  const trimmed = input.trim();
-  if (/^[a-zA-Z0-9_-]{11}$/.test(trimmed)) return true;
-  if (/youtube\.com|youtu\.be/i.test(trimmed)) return true;
-  return false;
+  return extractVideoId(input) !== null;
 }
 
 export const SidebarMenu: React.FC<SidebarMenuProps> = ({
@@ -173,6 +172,12 @@ export const SidebarMenu: React.FC<SidebarMenuProps> = ({
       }
       setYtResults(data.videos || []);
       setYtNextPageToken(data.nextPageToken || null);
+      recordUserActivity({
+        actionType: 'search',
+        title: `YouTube Video Search: ${q}`,
+        query: q,
+        details: `Found ${(data.videos || []).length} YouTube videos matching "${q}".`,
+      }).catch(() => {});
     } catch (err: any) {
       setYtError(err.message || 'Search failed.');
     } finally {
@@ -254,6 +259,7 @@ export const SidebarMenu: React.FC<SidebarMenuProps> = ({
     { id: 'knowledge', label: 'Key Ideas & Words', icon: BookOpen },
     { id: 'research', label: 'Exact Resources & Sources', icon: Globe },
     { id: 'lists', label: 'Artifacts Folder', icon: FolderOpen },
+    { id: 'history', label: 'History by Date', icon: Calendar },
     { id: 'techwords', label: 'Tech, AI & CSE Words', icon: Cpu },
     { id: 'scrape', label: 'Downloads & Info', icon: Database },
     { id: 'chat', label: 'Ask Anything', icon: MessageSquare },
@@ -786,7 +792,7 @@ export const SidebarMenu: React.FC<SidebarMenuProps> = ({
                       type="button"
                       onClick={() => {
                         onSelectTab('summary');
-                        onSubmitUrl(s.videoUrl || currentUrl, s.markdown);
+                        onSubmitUrl(s.videoUrl || '', s.markdown, s.videoTitle);
                       }}
                       className={`w-full flex items-center justify-between gap-1.5 px-2 py-1 rounded text-[11px] ${themeConfig.textSecondary} hover:${themeConfig.textPrimary} hover:bg-slate-500/10 text-left cursor-pointer truncate`}
                       title={`Load saved summary: ${s.videoTitle}`}

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { PanelLeft, Maximize2, Minimize2, SlidersHorizontal, Tv, Palette, Check, Cloud, LogIn, LogOut, FolderOpen, Cpu } from 'lucide-react';
+import { PanelLeft, Maximize2, Minimize2, SlidersHorizontal, Tv, Palette, Check, Cloud, LogIn, LogOut, FolderOpen, Cpu, Calendar } from 'lucide-react';
 import { User } from 'firebase/auth';
 import { OpenRouterModel, ThemeId } from '../types';
 import { APP_THEMES } from '../constants';
@@ -17,8 +17,8 @@ interface HeaderProps {
   isSidebarOpen?: boolean;
   isFullscreen?: boolean;
   onToggleFullscreen?: () => void;
-  activeTab?: 'summary' | 'transcript' | 'knowledge' | 'research' | 'scrape' | 'chat' | 'lists' | 'techwords';
-  onSelectTab?: (tab: 'summary' | 'transcript' | 'knowledge' | 'research' | 'scrape' | 'chat' | 'lists' | 'techwords') => void;
+  activeTab?: 'summary' | 'transcript' | 'knowledge' | 'research' | 'scrape' | 'chat' | 'lists' | 'techwords' | 'history';
+  onSelectTab?: (tab: 'summary' | 'transcript' | 'knowledge' | 'research' | 'scrape' | 'chat' | 'lists' | 'techwords' | 'history') => void;
   isMainOptionsOpen?: boolean;
   onToggleMainOptions?: () => void;
   showVideo?: boolean;
@@ -67,6 +67,7 @@ export const Header: React.FC<HeaderProps> = ({
     { id: 'knowledge', label: 'Key Ideas & Words' },
     { id: 'research', label: 'Exact Resources & Sources' },
     { id: 'lists', label: 'Artifacts Folder' },
+    { id: 'history', label: 'History by Date' },
     { id: 'techwords', label: 'Tech, AI & CSE Words' },
     { id: 'scrape', label: 'Downloads & Info' },
     { id: 'chat', label: 'Ask Anything' },
@@ -118,6 +119,22 @@ export const Header: React.FC<HeaderProps> = ({
 
       {/* Zone 3: Primary View Actions (Artifacts Folder, Tech & AI Words, Firebase Sync, Video, Theme Switcher, Toolbar & Fullscreen) */}
       <div className="flex items-center gap-1">
+        {onSelectTab && (
+          <button
+            type="button"
+            onClick={() => onSelectTab('history')}
+            className={`flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium rounded transition-colors cursor-pointer whitespace-nowrap ${
+              activeTab === 'history'
+                ? 'bg-indigo-600 text-white font-semibold'
+                : `${themeConfig.textSecondary} hover:${themeConfig.textPrimary} hover:bg-slate-500/10`
+            }`}
+            title="Open Complete Search & Activity History by Date (Saved in Database)"
+          >
+            <Calendar className="w-3 h-3 text-emerald-400" />
+            <span>History</span>
+          </button>
+        )}
+
         {onSelectTab && (
           <button
             type="button"

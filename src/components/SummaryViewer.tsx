@@ -42,6 +42,7 @@ import {
 import { SUMMARY_PRESETS, APP_THEMES } from '../constants';
 import { getTypographyStyles, getContentWidthClass } from './TypographySettingsModal';
 import { SmartImage } from './SmartImage';
+import { isSafeHttpUrl } from '../utils/subtitleParser';
 import { extractExactVideoResources } from '../services/exactResourceExtractor';
 import { createCustomExactResource, loadLocalCustomResources } from '../services/listsService';
 
@@ -405,6 +406,7 @@ export const SummaryViewer: React.FC<SummaryViewerProps> = ({
   const blockRefs = useRef<Record<number, HTMLDivElement | null>>({});
   const activeWordRef = useRef<HTMLSpanElement | null>(null);
   const lastWordTopRef = useRef<number>(0);
+  const translateAbortRef = useRef<AbortController | null>(null);
 
   const themeConfig = APP_THEMES[currentTheme] || APP_THEMES.midnight;
 
@@ -481,16 +483,28 @@ export const SummaryViewer: React.FC<SummaryViewerProps> = ({
   }, []);
 
   useEffect(() => {
+    if (translateAbortRef.current) {
+      translateAbortRef.current.abort();
+      translateAbortRef.current = null;
+    }
+    setIsTranslating(false);
     setTargetLang('en');
     setTranslatedMarkdown(null);
   }, [summary?.markdown]);
 
   const handleSelectLanguage = async (langCode: string) => {
+    if (translateAbortRef.current) {
+      translateAbortRef.current.abort();
+      translateAbortRef.current = null;
+    }
     setTargetLang(langCode);
     if (langCode === 'en' || !summary?.markdown) {
+      setIsTranslating(false);
       setTranslatedMarkdown(null);
       return;
     }
+    const controller = new AbortController();
+    translateAbortRef.current = controller;
     setIsTranslating(true);
     try {
       const res = await fetch('/api/translate', {
@@ -500,15 +514,18 @@ export const SummaryViewer: React.FC<SummaryViewerProps> = ({
           text: stripEmojis(summary.markdown),
           targetLang: langCode,
         }),
+        signal: controller.signal,
       });
       const data = await res.json();
-      if (res.ok && data.translatedText) {
+      if (!controller.signal.aborted && res.ok && data.translatedText) {
         setTranslatedMarkdown(data.translatedText);
       }
     } catch {
-      // ignore translation error
+      // ignore translation error or abort
     } finally {
-      setIsTranslating(false);
+      if (translateAbortRef.current === controller) {
+        setIsTranslating(false);
+      }
     }
   };
 
@@ -587,14 +604,17 @@ export const SummaryViewer: React.FC<SummaryViewerProps> = ({
     setExpandError(null);
 
     try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (openRouterKey?.trim()) {
+        headers['X-OpenRouter-Key'] = openRouterKey.trim();
+      }
       const res = await fetch('/api/deep-dive', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
           topic: topicToExpand,
           transcript: transcriptText,
           title: videoTitle,
-          openRouterKey,
           model: selectedModelId,
         }),
       });
@@ -706,33 +726,42 @@ export const SummaryViewer: React.FC<SummaryViewerProps> = ({
           {children}
         </blockquote>
       ),
-      img: ({ src, alt }: any) => (
-        <span className="my-6 block text-center">
-          <SmartImage
-            src={src}
-            alt={alt || 'Figure'}
-            variant="figure"
-            className="rounded-lg max-h-[520px] w-auto max-w-full object-contain mx-auto"
-          />
-          {alt && (
-            <span className="text-xs text-slate-400 mt-2 italic text-center block">
-              {alt}
-            </span>
-          )}
-        </span>
-      ),
-      a: ({ children, href, ...props }: any) => (
-        <a
-          href={href}
-          target="_blank"
-          rel="noreferrer"
-          className="text-indigo-400 hover:text-indigo-300 underline font-medium inline-flex items-center gap-1"
-          {...props}
-        >
-          <span>{children}</span>
-          <ExternalLink className="w-3 h-3 opacity-60 inline shrink-0" />
-        </a>
-      ),
+      img: ({ src, alt }: any) => {
+        if (!isSafeHttpUrl(src)) return null;
+        return (
+          <span className="my-6 block text-center">
+            <SmartImage
+              src={src}
+              alt={alt || 'Figure'}
+              variant="figure"
+              className="rounded-lg max-h-[520px] w-auto max-w-full object-contain mx-auto"
+            />
+            {alt && (
+              <span className="text-xs text-slate-400 mt-2 italic text-center block">
+                {alt}
+              </span>
+            )}
+          </span>
+        );
+      },
+      a: ({ children, href, ...props }: any) => {
+        const safeHref = isSafeHttpUrl(href) ? href : undefined;
+        if (!safeHref) {
+          return <span className="underline opacity-80">{children}</span>;
+        }
+        return (
+          <a
+            href={safeHref}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-indigo-400 hover:text-indigo-300 underline font-medium inline-flex items-center gap-1"
+            {...props}
+          >
+            <span>{children}</span>
+            <ExternalLink className="w-3 h-3 opacity-60 inline shrink-0" />
+          </a>
+        );
+      },
     }),
     [themeConfig.borderLight, onSeekToTimestamp, activeTimestamp]
   );
@@ -1372,7 +1401,7 @@ export const SummaryViewer: React.FC<SummaryViewerProps> = ({
                   Closer Look: {exp.topic}
                 </h3>
                 <div className={`prose ${themeConfig.proseClass} max-w-none`}>
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
                     {exp.content}
                   </ReactMarkdown>
                 </div>

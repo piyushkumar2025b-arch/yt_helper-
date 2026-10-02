@@ -8,7 +8,6 @@ export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
 
-// Validate connection to Firestore on boot per Firebase integration guidelines
 async function testConnection() {
   try {
     await getDocFromServer(doc(db, 'test', 'connection'));
@@ -18,7 +17,9 @@ async function testConnection() {
     }
   }
 }
-testConnection();
+if (typeof window !== 'undefined') {
+  testConnection();
+}
 
 export enum OperationType {
   CREATE = 'create',
@@ -46,12 +47,12 @@ export interface FirestoreErrorInfo {
   };
 }
 
-export function handleFirestoreError(
+export function buildFirestoreErrorInfo(
   error: unknown,
   operationType: OperationType,
   path: string | null
-): never {
-  const errInfo: FirestoreErrorInfo = {
+): FirestoreErrorInfo {
+  return {
     error: error instanceof Error ? error.message : String(error),
     authInfo: {
       userId: auth.currentUser?.uid,
@@ -68,6 +69,24 @@ export function handleFirestoreError(
     operationType,
     path,
   };
+}
+
+export function logFirestoreError(
+  error: unknown,
+  operationType: OperationType,
+  path: string | null
+): FirestoreErrorInfo {
+  const errInfo = buildFirestoreErrorInfo(error, operationType, path);
+  console.error('Firestore Listener Error: ', JSON.stringify(errInfo));
+  return errInfo;
+}
+
+export function handleFirestoreError(
+  error: unknown,
+  operationType: OperationType,
+  path: string | null
+): never {
+  const errInfo = buildFirestoreErrorInfo(error, operationType, path);
   console.error('Firestore Error: ', JSON.stringify(errInfo));
   throw new Error(JSON.stringify(errInfo));
 }

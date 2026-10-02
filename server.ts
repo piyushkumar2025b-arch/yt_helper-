@@ -1,6 +1,8 @@
-import express, { Request, Response } from 'express';
+import express, { Request, Response, NextFunction } from 'express';
 import { createServer as createViteServer } from 'vite';
 import path from 'path';
+import dns from 'dns/promises';
+import net from 'net';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
@@ -10,6 +12,7 @@ import {
   extractVideoId,
   formatTime,
   fetchPipedTranscript,
+  parseSubtitlePayload,
   SAMPLE_FALLBACK_TRANSCRIPTS,
   ParsedSegment,
 } from './src/server/transcriptHelper.ts';
@@ -22,10 +25,140 @@ const __dirname = path.dirname(__filename);
 async function startServer() {
   const app = express();
   const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
-  const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY || 'AIzaSyA-zrYkTBm-3lC8mmNRMGFxkmC5P9Pz65w';
-  const GOOGLE_CSE_ID = process.env.GOOGLE_CSE_ID || '017576662512468239146:omuauf_lfve';
+  // Read Google API keys strictly from environment variables (C-01)
+  const GOOGLE_API_KEY = (process.env.GOOGLE_API_KEY || '').trim();
+  const GOOGLE_CSE_ID = (process.env.GOOGLE_CSE_ID || '').trim();
 
   app.use(express.json({ limit: '15mb' }));
+
+  // Same-origin / CORS & Rate Limiting protection on /api routes (C-06)
+  const rateLimitWindowMs = 60_000;
+  const maxRequestsPerMinute = 120;
+  const maxLlmRequestsPerMinute = 25;
+  const ipRequestCounts = new Map<string, { count: number; llmCount: number; resetAt: number }>();
+
+  const ALLOWED_SERVER_OPENROUTER_MODELS = new Set([
+    'google/gemma-3-27b-it:free',
+    'meta-llama/llama-3.3-70b-instruct:free',
+    'qwen/qwen-2.5-72b-instruct:free',
+    'mistralai/mistral-small-3.1-24b-instruct:free',
+    'deepseek/deepseek-chat-v3-0324:free',
+    'deepseek/deepseek-r1:free',
+    'google/gemini-2.0-flash-exp:free',
+    'openrouter/auto',
+  ]);
+
+  function getOpenRouterRequestKey(req: Request): { key: string; isUserKey: boolean } {
+    const headerKey = String(req.headers['x-openrouter-key'] || '').trim();
+    const bodyKey = String(req.body?.openRouterKey || '').trim();
+    const userKey = headerKey || bodyKey;
+    if (userKey) {
+      return { key: userKey, isUserKey: true };
+    }
+    const serverKey = (process.env.OPENROUTER_API_KEY || '').trim();
+    return { key: serverKey, isUserKey: false };
+  }
+
+  function resolveOpenRouterModel(requestedModel: string | undefined, isUserKey: boolean): string {
+    const fallbackModel = 'meta-llama/llama-3.3-70b-instruct:free';
+    const trimmed = String(requestedModel || '').trim();
+    if (!trimmed) return fallbackModel;
+    if (isUserKey) return trimmed;
+    if (ALLOWED_SERVER_OPENROUTER_MODELS.has(trimmed) || trimmed.endsWith(':free')) {
+      return trimmed;
+    }
+    return fallbackModel;
+  }
+
+  function setBoundedCache<K, V>(map: Map<K, V>, key: K, value: V, maxSize = 150) {
+    if (map.size >= maxSize && !map.has(key)) {
+      const oldest = map.keys().next().value;
+      if (oldest !== undefined) map.delete(oldest);
+    }
+    map.set(key, value);
+  }
+
+  function isPrivateOrReservedIp(ip: string): boolean {
+    const cleanIp = ip.replace(/^::ffff:/i, '');
+    if (net.isIPv4(cleanIp)) {
+      const parts = cleanIp.split('.').map(Number);
+      if (parts[0] === 0 || parts[0] === 10 || parts[0] === 127) return true;
+      if (parts[0] === 169 && parts[1] === 254) return true;
+      if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return true;
+      if (parts[0] === 192 && parts[1] === 168) return true;
+      if (parts[0] === 100 && parts[1] >= 64 && parts[1] <= 127) return true;
+      if (parts[0] >= 224) return true;
+      return false;
+    }
+    if (net.isIPv6(cleanIp)) {
+      const lower = cleanIp.toLowerCase();
+      if (lower === '::1' || lower === '::' || lower.startsWith('fe80:') || lower.startsWith('fc') || lower.startsWith('fd')) {
+        return true;
+      }
+      return false;
+    }
+    return true;
+  }
+
+  async function isSafePublicUrl(rawUrl: string): Promise<boolean> {
+    try {
+      const parsed = new URL(rawUrl);
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+      if (parsed.username || parsed.password) return false;
+      const hostname = parsed.hostname.toLowerCase();
+      if (
+        hostname === 'localhost' ||
+        hostname.endsWith('.local') ||
+        hostname.endsWith('.internal') ||
+        hostname === 'metadata.google.internal'
+      ) {
+        return false;
+      }
+      if (net.isIP(hostname)) {
+        return !isPrivateOrReservedIp(hostname);
+      }
+      const records = await dns.lookup(hostname, { all: true });
+      if (!records || records.length === 0) return false;
+      return records.every((r) => !isPrivateOrReservedIp(r.address));
+    } catch {
+      return false;
+    }
+  }
+
+  app.use('/api', (req: Request, res: Response, next: NextFunction) => {
+    const origin = req.headers.origin;
+    const host = req.headers.host;
+    if (origin && host) {
+      try {
+        const originHost = new URL(origin).host;
+        if (originHost !== host) {
+          res.status(403).json({ ok: false, error: 'Cross-origin API requests are not permitted.' });
+          return;
+        }
+      } catch {
+        res.status(403).json({ ok: false, error: 'Invalid Origin header.' });
+        return;
+      }
+    }
+
+    const clientIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket.remoteAddress || 'unknown';
+    const now = Date.now();
+    let entry = ipRequestCounts.get(clientIp);
+    if (!entry || now > entry.resetAt) {
+      entry = { count: 0, llmCount: 0, resetAt: now + rateLimitWindowMs };
+      if (ipRequestCounts.size > 2000) ipRequestCounts.clear();
+      ipRequestCounts.set(clientIp, entry);
+    }
+    entry.count++;
+    const isLlmRoute = ['/summarize', '/chat', '/continue-summary', '/deep-dive', '/translate'].includes(req.path);
+    if (isLlmRoute) entry.llmCount++;
+
+    if (entry.count > maxRequestsPerMinute || (isLlmRoute && entry.llmCount > maxLlmRequestsPerMinute)) {
+      res.status(429).json({ ok: false, error: 'Rate limit exceeded. Please wait a moment before trying again.' });
+      return;
+    }
+    next();
+  });
 
   // Helper to fetch YouTube metadata via YouTube Data API v3 with oEmbed fallback
   async function fetchVideoOEmbed(videoId: string) {
@@ -88,88 +221,154 @@ async function startServer() {
     };
   }
 
-  // 1. GET /api/transcript
-  app.get('/api/transcript', async (req: Request, res: Response) => {
+  // 1. GET & POST /api/transcript - Multi-Method Transcript Extractor (YouTube, Mirrors, Gemini Native Video, Direct Subtitle URL, or Raw Text/SRT/VTT/JSON)
+  const handleTranscriptRequest = async (req: Request, res: Response) => {
     try {
-      const queryUrl = (req.query.url as string) || (req.query.videoId as string);
-      if (!queryUrl) {
-        res.status(400).json({ error: 'Please provide a YouTube video URL or video ID.' });
+      const rawInput = String(
+        req.body?.url ||
+          req.body?.rawText ||
+          req.query.url ||
+          req.query.videoId ||
+          ''
+      ).trim();
+      const customTitle = String(req.body?.title || req.query.title || '').trim();
+
+      if (!rawInput) {
+        res.status(400).json({ error: 'Please provide a YouTube video URL, video ID, subtitle URL, or transcript text.' });
         return;
       }
 
-      const videoId = extractVideoId(queryUrl);
+      const videoId = extractVideoId(rawInput);
+
+      // Branch A: Non-YouTube input — check if it is a direct subtitle/transcript URL or raw pasted transcript text
       if (!videoId) {
-        res.status(400).json({ error: 'Invalid YouTube URL or ID. Please check the link and try again.' });
+        if (/^https?:\/\//i.test(rawInput) && !/\s/.test(rawInput)) {
+          const safe = await isSafePublicUrl(rawInput);
+          if (!safe) {
+            res.status(400).json({ error: 'Invalid or restricted URL. Please provide a valid YouTube URL or public HTTPS transcript file.' });
+            return;
+          }
+          try {
+            const directRes = await fetch(rawInput, {
+              signal: AbortSignal.timeout(8000),
+              redirect: 'error',
+              headers: {
+                'User-Agent': 'Mozilla/5.0 (compatible; OpenTranscriptAI/1.0)',
+                Accept: 'text/plain, text/vtt, application/x-subrip, application/xml, application/json, */*',
+              },
+            });
+            if (!directRes.ok) {
+              res.status(400).json({ error: `Could not fetch transcript URL (HTTP ${directRes.status}).` });
+              return;
+            }
+            const bodyText = await directRes.text();
+            const parsedSegments = parseSubtitlePayload(bodyText, true);
+            if (!parsedSegments || parsedSegments.length === 0) {
+              res.status(400).json({ error: 'The provided URL did not contain recognizable transcript or subtitle text.' });
+              return;
+            }
+            const fullText = parsedSegments.map((s) => s.text).join(' ');
+            const totalWords = fullText.split(/\s+/).filter(Boolean).length;
+            const lastSeg = parsedSegments[parsedSegments.length - 1];
+            const durationSeconds = lastSeg ? lastSeg.start + lastSeg.duration : 0;
+            const urlFileName = new URL(rawInput).pathname.split('/').pop() || 'External Transcript';
+
+            res.json({
+              ok: true,
+              metadata: {
+                videoId: '',
+                url: rawInput,
+                title: customTitle || urlFileName,
+                authorName: new URL(rawInput).hostname,
+                authorUrl: '',
+                thumbnailUrl: '',
+                durationSeconds: Math.round(durationSeconds),
+                durationFormatted: formatTime(durationSeconds),
+                totalSegments: parsedSegments.length,
+                totalWords,
+                estimatedTokens: Math.round(totalWords * 1.33),
+              },
+              segments: parsedSegments,
+              fullText,
+            });
+            return;
+          } catch (fetchErr: any) {
+            res.status(400).json({ error: fetchErr?.message || 'Failed to load direct transcript URL.' });
+            return;
+          }
+        }
+
+        // Check if rawInput itself is pasted transcript text (.srt, .vtt, [MM:SS] lines, JSON, or multi-word prose)
+        if (rawInput.length > 25 && (rawInput.includes(' ') || rawInput.includes('\n'))) {
+          const parsedSegments = parseSubtitlePayload(rawInput, true);
+          if (parsedSegments && parsedSegments.length > 0) {
+            const fullText = parsedSegments.map((s) => s.text).join(' ');
+            const totalWords = fullText.split(/\s+/).filter(Boolean).length;
+            const lastSeg = parsedSegments[parsedSegments.length - 1];
+            const durationSeconds = lastSeg ? lastSeg.start + lastSeg.duration : 0;
+
+            res.json({
+              ok: true,
+              metadata: {
+                videoId: '',
+                url: '',
+                title: customTitle || 'Pasted / Uploaded Transcript',
+                authorName: 'Direct Input',
+                authorUrl: '',
+                thumbnailUrl: '',
+                durationSeconds: Math.round(durationSeconds),
+                durationFormatted: formatTime(durationSeconds),
+                totalSegments: parsedSegments.length,
+                totalWords,
+                estimatedTokens: Math.round(totalWords * 1.33),
+              },
+              segments: parsedSegments,
+              fullText,
+            });
+            return;
+          }
+        }
+
+        res.status(400).json({ error: 'Invalid YouTube URL or ID. Paste a YouTube link, direct subtitle URL, or transcript text.' });
         return;
       }
 
+      // Branch B: Valid YouTube Video ID
       const oembed = await fetchVideoOEmbed(videoId);
 
       // 1. Instant check for curated sample transcripts
       let segments: ParsedSegment[] | null = SAMPLE_FALLBACK_TRANSCRIPTS[videoId] || null;
 
-      // 2. If not a pre-cached sample, attempt open-source transcript extraction
+      // 2. Multi-method extraction (Direct YouTube, Innertube, Piped, Invidious, Gemini Native Video & Search Grounding)
       if (!segments || segments.length === 0) {
-        segments = await fetchPipedTranscript(videoId);
+        segments = await fetchPipedTranscript(videoId, {
+          title: oembed.title,
+          authorName: oembed.authorName,
+          description: oembed.description,
+        });
       }
 
-      // 3. If captions are disabled or unavailable on YouTube, construct structured segments from official YouTube Data API v3 description & metadata if present
-      if ((!segments || segments.length === 0) && oembed.description && oembed.description.trim().length > 10) {
-        const lines = oembed.description
-          .split(/\r?\n/)
-          .map((l: string) => l.trim())
-          .filter((l: string) => l.length > 0);
-        segments = lines.map((line: string, idx: number) => ({
-          start: idx * 8,
-          duration: 8,
-          text: line,
-          formattedTime: formatTime(idx * 8),
-        }));
-      }
-
-      // 4. Ultimate Resilient Fallback: If captions are disabled by the creator and no description is returned,
-      // gather public context via Wikipedia/YouTube search on the video title & channel so the user still gets a helpful breakdown instead of a 404 dead end.
+      // Do not fabricate fake transcripts from descriptions or Wikipedia when captions are missing (C-03)
       if (!segments || segments.length === 0) {
-        const cleanTitle = (oembed.title || `YouTube Video ${videoId}`).replace(/\([^)]*\)|\[[^\]]*\]/g, '').trim();
-        const channel = oembed.authorName || 'YouTube Creator';
-        const fallbackLines: string[] = [
-          `Video Title: "${oembed.title || cleanTitle}" by ${channel}.`,
-        ];
-
-        try {
-          const wikiUrl = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(cleanTitle)}&utf8=&format=json&srlimit=3`;
-          const wikiRes = await fetch(wikiUrl, { signal: AbortSignal.timeout(3500) });
-          if (wikiRes.ok) {
-            const wikiData = (await wikiRes.json()) as any;
-            const searchItems = wikiData?.query?.search || [];
-            for (const item of searchItems) {
-              const plainSnippet = String(item.snippet || '')
-                .replace(/<[^>]+>/g, '')
-                .replace(/&quot;/g, '"')
-                .replace(/&#039;/g, "'")
-                .replace(/&amp;/g, '&')
-                .trim();
-              if (plainSnippet) {
-                fallbackLines.push(`${item.title}: ${plainSnippet}`);
-              }
-            }
-          }
-        } catch {
-          // ignore
-        }
-
-        fallbackLines.push(
-          `Overview of "${oembed.title}" presented by ${channel}.`,
-          `Core theme and discussion points covered in "${cleanTitle}".`,
-          `Key takeaways, real-world context, and practical insights from ${channel}'s video "${oembed.title}".`
-        );
-
-        segments = fallbackLines.map((line, idx) => ({
-          start: idx * 15,
-          duration: 15,
-          text: line,
-          formattedTime: formatTime(idx * 15),
-        }));
+        res.status(404).json({
+          ok: false,
+          error:
+            'No captions or transcript tracks were found for this video. Please paste a transcript manually using "Paste Text" to analyze it.',
+          metadata: {
+            videoId,
+            url: `https://www.youtube.com/watch?v=${videoId}`,
+            title: oembed.title,
+            authorName: oembed.authorName,
+            authorUrl: oembed.authorUrl,
+            thumbnailUrl: oembed.thumbnailUrl,
+            durationSeconds: 0,
+            durationFormatted: '00:00',
+            totalSegments: 0,
+            totalWords: 0,
+            estimatedTokens: 0,
+          },
+        });
+        return;
       }
 
       // Calculate statistics
@@ -203,20 +402,25 @@ async function startServer() {
         error: error.message || 'Failed to retrieve transcript. Please try another video or paste manually.',
       });
     }
-  });
+  };
+
+  app.get('/api/transcript', handleTranscriptRequest);
+  app.post('/api/transcript', handleTranscriptRequest);
 
   // In-memory cache & rate-limit tracker to preserve free-tier model quotas
   const geminiResponseCache = new Map<string, { text: string; modelUsed: string; finishReason: string }>();
   const modelCooldownUntil = new Map<string, number>();
 
-  function buildDeterministicFallbackReport(promptText: string): string {
+  function buildDeterministicFallbackReport(promptText: string, explicitVideoId?: string): string {
     const titleMatch = promptText.match(/Video Title:\s*"([^"]+)"/i) || promptText.match(/VIDEO TITLE:\s*"([^"]+)"/i);
     const title = titleMatch ? titleMatch[1] : 'Video Breakdown';
+    const urlMatch = promptText.match(/Source URL:\s*([^\s\n]+)/i);
+    const extractedVid = explicitVideoId || (urlMatch ? extractVideoId(urlMatch[1]) : null);
     const transcriptIdx = promptText.lastIndexOf('TRANSCRIPT:');
     const rawTranscript = transcriptIdx !== -1 ? promptText.slice(transcriptIdx + 11).trim() : promptText;
 
-    // If this is Steve Jobs' Stanford talk, return a deeply human, natural, engaging breakdown
-    if (/steve jobs|stanford/i.test(title) || /connect the dots|reed college|stay hungry/i.test(rawTranscript)) {
+    // Only return curated sample reports when the exact sample videoId matches (C-04)
+    if (extractedVid === 'UF8uR6Z6KLc') {
       return `# ${title}
 
 ## What This Talk Is Really About
@@ -288,7 +492,7 @@ His core message is simple and deeply human: **life rarely goes according to a n
 - **[00:00]** [**Stanford University Official 2005 Commencement Verbatim Text**](https://news.stanford.edu/stories/2005/06/youve-got-find-love-jobs-says) & [**Make Something Wonderful (Steve Jobs Archive Free Book)**](https://stevejobsarchive.com/)`;
     }
 
-    if (/but what is a neural network|3blue1brown|mnist|pixel|sigmoid|relu/i.test(`${title} ${rawTranscript}`)) {
+    if (extractedVid === 'aircAruvnKk') {
       return `# ${title}
 
 ## What This Video Is Really About
@@ -337,7 +541,7 @@ Grant Sanderson (3Blue1Brown) pulls back the curtain on **neural networks** by s
 - **[15:25]** [**Deep Sparse Rectifier Neural Networks (Glorot, Bordes, Bengio, 2011 — ReLU Paper)**](https://proceedings.mlr.press/v15/glorot11a.html) — Foundational paper showing why ReLU outperforms Sigmoid in deep networks ([Google Scholar](https://scholar.google.com/scholar?q=Deep+Sparse+Rectifier+Neural+Networks))`;
     }
 
-    if (/simplest math problem|collatz|3x\s*\+\s*1|veritasium/i.test(`${title} ${rawTranscript}`)) {
+    if (extractedVid === '094y1Z2wpJg') {
       return `# ${title}
 
 ## What This Video Is Really About
@@ -449,9 +653,9 @@ ${keyStatements || `> "${rawTranscript.slice(0, 300)}"`}
       .join('\n\n')}\n\n**In short:** The speaker uses **${cleanTopic}** to ground the bigger message in real-world experience so you can apply the lesson directly.`;
   }
 
-  function buildHumanChatAnswer(question: string, transcript: string, title: string): string {
+  function buildHumanChatAnswer(question: string, transcript: string, title: string, videoId?: string): string {
     const qLower = question.toLowerCase();
-    if (/steve jobs|stanford/i.test(title) || /reed college|connect the dots/i.test(transcript)) {
+    if (videoId === 'UF8uR6Z6KLc') {
       if (qLower.includes('quote') || qLower.includes('memorable')) {
         return `Here are the most memorable quotes Steve Jobs shared in this speech, along with their exact timestamps:\n\n- **[04:35]** *"You can't connect the dots looking forward; you can only connect them looking backwards."*\n- **[07:05]** *"The heaviness of being successful was replaced by the lightness of being a beginner again."*\n- **[08:22]** *"The only way to do great work is to love what you do. If you haven't found it yet, keep looking. Don't settle."*\n- **[12:55]** *"Your time is limited, so don't waste it living someone else's life."*\n- **[14:12]** *"Stay Hungry. Stay Foolish."*`;
       }
@@ -494,14 +698,21 @@ ${keyStatements || `> "${rawTranscript.slice(0, 300)}"`}
       .join('\n\n')}`;
   }
 
-  // Resilient Gemini helper with automatic model fallback, cooldown tracking, and caching
-  async function runGeminiWithFallback(promptText: string, maxTokens: number = 8192) {
+  // Resilient Gemini helper with automatic model fallback, cooldown tracking, and bounded caching
+  async function runGeminiWithFallback(promptText: string, maxTokens: number = 8192): Promise<{
+    text: string;
+    modelUsed: string;
+    providerUsed: 'gemini' | 'openrouter' | 'local-extractive';
+    finishReason: string;
+    warning?: string;
+  }> {
     const cacheKey = `${maxTokens}:${promptText.slice(0, 400)}:${promptText.slice(-400)}:${promptText.length}`;
     const cached = geminiResponseCache.get(cacheKey);
     if (cached) {
-      return cached;
+      return { ...cached, providerUsed: 'gemini' };
     }
 
+    let lastError = '';
     if (process.env.GEMINI_API_KEY) {
       const ai = new GoogleGenAI({
         apiKey: process.env.GEMINI_API_KEY,
@@ -512,7 +723,7 @@ ${keyStatements || `> "${rawTranscript.slice(0, 300)}"`}
         },
       });
 
-      const modelsToTry = ['gemini-3-flash-preview', 'gemini-3.1-flash-lite-preview', 'gemini-2.5-flash'];
+      const modelsToTry = ['gemini-3.1-flash-lite', 'gemini-flash-latest', 'gemini-3.8-flash'];
       const now = Date.now();
 
       for (const m of modelsToTry) {
@@ -534,11 +745,12 @@ ${keyStatements || `> "${rawTranscript.slice(0, 300)}"`}
           const finishReason = candidate?.finishReason || 'STOP';
           const result = { text: response.text || '', modelUsed: m, finishReason };
           if (result.text) {
-            geminiResponseCache.set(cacheKey, result);
-            return result;
+            setBoundedCache(geminiResponseCache, cacheKey, result, 150);
+            return { ...result, providerUsed: 'gemini' };
           }
         } catch (e: any) {
-          const errStr = String(e?.message || e || '').toLowerCase();
+          lastError = String(e?.message || e || 'Gemini error');
+          const errStr = lastError.toLowerCase();
           if (
             errStr.includes('429') ||
             errStr.includes('resource_exhausted') ||
@@ -547,7 +759,6 @@ ${keyStatements || `> "${rawTranscript.slice(0, 300)}"`}
             errStr.includes('503') ||
             errStr.includes('unavailable')
           ) {
-            // Put this model on a 5-minute cooldown so subsequent requests immediately use the fallback
             modelCooldownUntil.set(m, Date.now() + 5 * 60 * 1000);
           }
         }
@@ -569,15 +780,15 @@ ${keyStatements || `> "${rawTranscript.slice(0, 300)}"`}
             max_tokens: Math.min(maxTokens, 8000),
             temperature: 0.3,
           }),
-          signal: AbortSignal.timeout(15000),
+          signal: AbortSignal.timeout(25000),
         });
         if (groqRes.ok) {
           const groqData = (await groqRes.json()) as any;
           const text = groqData.choices?.[0]?.message?.content || '';
           if (text) {
             const resObj = { text, modelUsed: 'groq/llama-3.3-70b-versatile', finishReason: 'STOP' };
-            geminiResponseCache.set(cacheKey, resObj);
-            return resObj;
+            setBoundedCache(geminiResponseCache, cacheKey, resObj, 150);
+            return { ...resObj, providerUsed: 'openrouter' };
           }
         }
       } catch {}
@@ -598,15 +809,15 @@ ${keyStatements || `> "${rawTranscript.slice(0, 300)}"`}
             max_tokens: Math.min(maxTokens, 8000),
             temperature: 0.3,
           }),
-          signal: AbortSignal.timeout(18000),
+          signal: AbortSignal.timeout(25000),
         });
         if (oaRes.ok) {
           const oaData = (await oaRes.json()) as any;
           const text = oaData.choices?.[0]?.message?.content || '';
           if (text) {
             const resObj = { text, modelUsed: 'openai/gpt-4o-mini', finishReason: 'STOP' };
-            geminiResponseCache.set(cacheKey, resObj);
-            return resObj;
+            setBoundedCache(geminiResponseCache, cacheKey, resObj, 150);
+            return { ...resObj, providerUsed: 'openrouter' };
           }
         }
       } catch {}
@@ -627,26 +838,30 @@ ${keyStatements || `> "${rawTranscript.slice(0, 300)}"`}
             max_tokens: Math.min(maxTokens, 8000),
             messages: [{ role: 'user', content: promptText }],
           }),
-          signal: AbortSignal.timeout(20000),
+          signal: AbortSignal.timeout(30000),
         });
         if (antRes.ok) {
           const antData = (await antRes.json()) as any;
           const text = antData.content?.[0]?.text || '';
           if (text) {
             const resObj = { text, modelUsed: 'anthropic/claude-3-5-sonnet', finishReason: 'STOP' };
-            geminiResponseCache.set(cacheKey, resObj);
-            return resObj;
+            setBoundedCache(geminiResponseCache, cacheKey, resObj, 150);
+            return { ...resObj, providerUsed: 'openrouter' };
           }
         }
       } catch {}
     }
 
-    // If all cloud LLM keys are rate-limited or unset, return a clean deterministic human synthesis
+    // When no LLM key is configured or all failed, attribute honestly as local-extractive (C-05)
     const fallbackText = buildDeterministicFallbackReport(promptText);
     return {
       text: fallbackText,
-      modelUsed: 'gemini-3.1-flash-lite',
+      modelUsed: 'extractive-fallback',
+      providerUsed: 'local-extractive',
       finishReason: 'STOP',
+      warning: lastError
+        ? `Cloud AI provider error (${lastError.slice(0, 120)}). Generated local extractive breakdown.`
+        : 'No server AI key configured. Generated local extractive breakdown.',
     };
   }
 
@@ -795,9 +1010,21 @@ IMPORTANT RULES:
 4. Clean Formatting: Use clear headings, bold highlights, blockquotes for real quotes, and bullet points where helpful. Do not use emojis.
 5. Stay True to the Video: Stick to what the speaker actually said and shared.`;
 
+      const detailInstructionMap: Record<string, string> = {
+        brief: 'Brief & Concise (Keep sections compact; focus on top takeaways and high-level summary)',
+        concise: 'Brief & Concise (Keep sections compact; focus on top takeaways and high-level summary)',
+        medium: 'Balanced & Structured (Moderate depth with key examples and clear section breakdowns)',
+        standard: 'Balanced & Structured (Moderate depth with key examples and clear section breakdowns)',
+        detailed: 'Detailed & Thorough (Comprehensive chronological walkthrough, technical nuances, and verbatim quotes)',
+        extensive: 'Detailed & Thorough (Comprehensive chronological walkthrough, technical nuances, and verbatim quotes)',
+        comprehensive: 'Massive, Exhaustive Detail (Cover every chronological milestone, story, quote, and entity in full depth)',
+        massive: 'Massive, Exhaustive Detail (Cover every chronological milestone, story, quote, and entity in full depth)',
+      };
+      const detailGuidance = detailInstructionMap[String(detailLevel).toLowerCase()] || detailInstructionMap.comprehensive;
+
       const userPrompt = `Video Title: "${videoTitle}"
 Source URL: ${url || 'N/A'}
-Requested Detail Level: ${detailLevel} (Massive, exhaustive detail)
+Requested Detail Level: ${detailLevel} (${detailGuidance})
 Summary Mode: ${summaryType}
 ${customPrompt ? `Special User Request: ${customPrompt}\n` : ''}
 
@@ -805,11 +1032,14 @@ TRANSCRIPT:
 ${transcript.slice(0, 200000)}
 `;
 
-      // Branch 1: OpenRouter (with automatic fallback to Gemini / Human Synthesis if key missing or model overloaded)
+      let openRouterWarning = '';
+
+      // Branch 1: OpenRouter (with 55s timeout, model allowlist for server key, and explicit error reporting - C-05, C-06, C-08, H-10)
       if (provider === 'openrouter') {
-        const apiKey = openRouterKey || process.env.OPENROUTER_API_KEY;
+        const { key: apiKey, isUserKey } = getOpenRouterRequestKey(req);
 
         if (apiKey) {
+          const targetModel = resolveOpenRouterModel(model, isUserKey);
           try {
             const orResponse = await fetch('https://openrouter.ai/api/v1/chat/completions', {
               method: 'POST',
@@ -820,7 +1050,7 @@ ${transcript.slice(0, 200000)}
                 'Content-Type': 'application/json',
               },
               body: JSON.stringify({
-                model: model || 'meta-llama/llama-3.3-70b-instruct:free',
+                model: targetModel,
                 messages: [
                   { role: 'system', content: systemInstruction },
                   { role: 'user', content: userPrompt },
@@ -828,7 +1058,7 @@ ${transcript.slice(0, 200000)}
                 max_tokens: 8192,
                 temperature: 0.3,
               }),
-              signal: AbortSignal.timeout(18000),
+              signal: AbortSignal.timeout(55000),
             });
 
             if (orResponse.ok) {
@@ -843,7 +1073,7 @@ ${transcript.slice(0, 200000)}
                 res.json({
                   ok: true,
                   markdown,
-                  modelUsed: model,
+                  modelUsed: targetModel,
                   providerUsed: 'openrouter',
                   finishReason,
                   isTruncated,
@@ -860,20 +1090,29 @@ ${transcript.slice(0, 200000)}
                 });
                 return;
               }
+            } else {
+              const errBody = await orResponse.text().catch(() => '');
+              openRouterWarning = `OpenRouter HTTP ${orResponse.status}: ${errBody.slice(0, 160) || orResponse.statusText}`;
+              console.warn('OpenRouter non-OK status:', openRouterWarning);
             }
-          } catch (orErr) {
-            console.warn('OpenRouter request failed or overloaded, falling back to Gemini / Human Synthesis:', orErr);
+          } catch (orErr: any) {
+            openRouterWarning = `OpenRouter request failed: ${orErr?.message || 'timeout'}`;
+            console.warn('OpenRouter request failed, falling back:', openRouterWarning);
           }
+        } else {
+          openRouterWarning = 'No OpenRouter API key provided.';
         }
 
-        // Automatic fallback to Gemini / Deterministic Human Guide
+        // Automatic fallback to Gemini / Deterministic Extractive Guide
         const geminiResult = await runGeminiWithFallback(`${systemInstruction}\n\n${userPrompt}`, 8192);
         const isTruncated = geminiResult.finishReason === 'MAX_TOKENS';
+        const combinedWarning = [openRouterWarning, geminiResult.warning].filter(Boolean).join(' ');
         res.json({
           ok: true,
           markdown: geminiResult.text || buildDeterministicFallbackReport(userPrompt),
           modelUsed: geminiResult.modelUsed,
-          providerUsed: 'gemini',
+          providerUsed: geminiResult.providerUsed,
+          warning: combinedWarning || undefined,
           summaryType,
           finishReason: geminiResult.finishReason,
           isTruncated,
@@ -883,14 +1122,15 @@ ${transcript.slice(0, 200000)}
         return;
       }
 
-      // Branch 2: Gemini (with automatic fallback to Deterministic Human Guide)
+      // Branch 2: Gemini (with honest provider attribution on fallback - C-05)
       const geminiResult = await runGeminiWithFallback(`${systemInstruction}\n\n${userPrompt}`, 8192);
       const isTruncated = geminiResult.finishReason === 'MAX_TOKENS';
       res.json({
         ok: true,
         markdown: geminiResult.text || buildDeterministicFallbackReport(userPrompt),
         modelUsed: geminiResult.modelUsed,
-        providerUsed: 'gemini',
+        providerUsed: geminiResult.providerUsed,
+        warning: geminiResult.warning,
         finishReason: geminiResult.finishReason,
         isTruncated,
         continuationCount: 0,
@@ -898,18 +1138,10 @@ ${transcript.slice(0, 200000)}
         createdAt: new Date().toISOString(),
       });
     } catch (error: any) {
-      console.warn('Summarize error caught, returning human fallback synthesis:', error);
-      const fallbackPrompt = `Video Title: "${req.body?.title || 'Video Breakdown'}"\nTRANSCRIPT:\n${req.body?.transcript || ''}`;
-      res.json({
-        ok: true,
-        markdown: buildDeterministicFallbackReport(fallbackPrompt),
-        modelUsed: 'gemini-3-flash-preview',
-        providerUsed: 'gemini',
-        finishReason: 'STOP',
-        isTruncated: false,
-        continuationCount: 0,
-        summaryType: req.body?.summaryType || 'massive',
-        createdAt: new Date().toISOString(),
+      console.error('Summarize error:', error);
+      res.status(500).json({
+        ok: false,
+        error: error.message || 'Summarization failed.',
       });
     }
   });
@@ -974,12 +1206,15 @@ If the last sentence above is unfinished, complete it immediately and then conti
 
       let continuationText = '';
       let modelUsed = model;
-      let providerUsed = provider;
+      let providerUsed: string = provider;
       let finishReason = 'stop';
       let isTruncated = false;
+      let warningMsg = '';
 
-      const apiKey = openRouterKey || process.env.OPENROUTER_API_KEY;
+      const { key: apiKey, isUserKey } = getOpenRouterRequestKey(req);
       if (provider === 'openrouter' && apiKey) {
+        const targetModel = resolveOpenRouterModel(model, isUserKey);
+        modelUsed = targetModel;
         try {
           const orResponse = await fetch('https://openrouter.ai/api/v1/chat/completions', {
             method: 'POST',
@@ -990,7 +1225,7 @@ If the last sentence above is unfinished, complete it immediately and then conti
               'Content-Type': 'application/json',
             },
             body: JSON.stringify({
-              model: model || 'meta-llama/llama-3.3-70b-instruct:free',
+              model: targetModel,
               messages: [
                 { role: 'system', content: continuationSystemInstruction },
                 { role: 'user', content: continuationUserPrompt },
@@ -998,7 +1233,7 @@ If the last sentence above is unfinished, complete it immediately and then conti
               max_tokens: 8192,
               temperature: 0.3,
             }),
-            signal: AbortSignal.timeout(18000),
+            signal: AbortSignal.timeout(55000),
           });
 
           if (orResponse.ok) {
@@ -1007,17 +1242,23 @@ If the last sentence above is unfinished, complete it immediately and then conti
             continuationText = choice?.message?.content || '';
             finishReason = choice?.finish_reason || 'stop';
             isTruncated = finishReason === 'length';
+          } else {
+            const errBody = await orResponse.text().catch(() => '');
+            warningMsg = `OpenRouter HTTP ${orResponse.status}: ${errBody.slice(0, 150)}`;
           }
-        } catch {}
+        } catch (err: any) {
+          warningMsg = `OpenRouter error: ${err?.message || 'timeout'}`;
+        }
       }
 
       if (!continuationText.trim()) {
         const gemResult = await runGeminiWithFallback(`${continuationSystemInstruction}\n\n${continuationUserPrompt}`, 8192);
         continuationText = gemResult.text || '';
         modelUsed = gemResult.modelUsed;
-        providerUsed = 'gemini';
+        providerUsed = gemResult.providerUsed;
         finishReason = gemResult.finishReason || 'STOP';
         isTruncated = finishReason === 'MAX_TOKENS';
+        warningMsg = [warningMsg, gemResult.warning].filter(Boolean).join(' ');
       }
 
       const prevTrimmed = previousMarkdown.trimEnd();
@@ -1037,21 +1278,16 @@ If the last sentence above is unfinished, complete it immediately and then conti
         fullMarkdown: merged,
         modelUsed,
         providerUsed,
+        warning: warningMsg || undefined,
         finishReason,
         isTruncated,
         continuationCount: (continuationCount || 0) + 1,
       });
     } catch (err: any) {
-      console.warn('Error continuing summary, returning existing summary:', err);
-      res.json({
-        ok: true,
-        continuation: '',
-        fullMarkdown: req.body?.previousMarkdown || '',
-        modelUsed: 'gemini-3-flash-preview',
-        providerUsed: 'gemini',
-        finishReason: 'STOP',
-        isTruncated: false,
-        continuationCount: (req.body?.continuationCount || 0) + 1,
+      console.error('Error continuing summary:', err);
+      res.status(500).json({
+        ok: false,
+        error: err.message || 'Failed to continue summary.',
       });
     }
   });
@@ -1079,8 +1315,9 @@ TRANSCRIPT:
 ${transcript.slice(0, 150000)}
 `;
 
-      const apiKey = openRouterKey || process.env.OPENROUTER_API_KEY;
+      const { key: apiKey, isUserKey } = getOpenRouterRequestKey(req);
       if (apiKey) {
+        const targetModel = resolveOpenRouterModel(model, isUserKey);
         try {
           const orRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
             method: 'POST',
@@ -1091,12 +1328,12 @@ ${transcript.slice(0, 150000)}
               'Content-Type': 'application/json',
             },
             body: JSON.stringify({
-              model,
+              model: targetModel,
               messages: [{ role: 'user', content: prompt }],
               max_tokens: 4096,
               temperature: 0.3,
             }),
-            signal: AbortSignal.timeout(15000),
+            signal: AbortSignal.timeout(45000),
           });
 
           if (orRes.ok) {
@@ -1148,7 +1385,8 @@ ${transcript.slice(0, 150000)}
         return;
       }
 
-      const apiKey = openRouterKey || process.env.OPENROUTER_API_KEY;
+      const { key: apiKey, isUserKey } = getOpenRouterRequestKey(req);
+      let chatWarning = '';
 
       const prompt = `You are a friendly, helpful person who just watched the YouTube video "${title || 'Video'}" and knows it inside out.
 Answer the user's question clearly, warmly, and naturally in plain everyday English based on the transcript below. Avoid stiff AI clichés or robotic jargon. If timestamps are available, mention the [MM:SS] timestamps naturally so they can jump to that moment.
@@ -1161,6 +1399,7 @@ ${transcript.slice(0, 150000)}
 `;
 
       if (apiKey) {
+        const targetModel = resolveOpenRouterModel(model, isUserKey);
         try {
           const orRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
             method: 'POST',
@@ -1171,40 +1410,47 @@ ${transcript.slice(0, 150000)}
               'Content-Type': 'application/json',
             },
             body: JSON.stringify({
-              model: model || 'meta-llama/llama-3.3-70b-instruct:free',
+              model: targetModel,
               messages: [{ role: 'user', content: prompt }],
               temperature: 0.3,
             }),
-            signal: AbortSignal.timeout(15000),
+            signal: AbortSignal.timeout(45000),
           });
 
           if (orRes.ok) {
             const data = (await orRes.json()) as any;
             const ans = data.choices?.[0]?.message?.content || '';
             if (ans.trim()) {
-              res.json({ answer: ans });
+              res.json({ answer: ans, providerUsed: 'openrouter', modelUsed: targetModel });
               return;
             }
+          } else {
+            const errBody = await orRes.text().catch(() => '');
+            chatWarning = `OpenRouter HTTP ${orRes.status}: ${errBody.slice(0, 140) || orRes.statusText}`;
           }
-        } catch {}
+        } catch (err: any) {
+          chatWarning = `OpenRouter error: ${err?.message || 'timeout'}`;
+        }
       }
 
       if (process.env.GEMINI_API_KEY) {
         try {
           const result = await runGeminiWithFallback(prompt, 2048);
-          if (result.text && !result.text.startsWith('# ')) {
-            res.json({ answer: result.text });
+          if (result.text && result.providerUsed === 'gemini') {
+            res.json({ answer: result.text, providerUsed: 'gemini', modelUsed: result.modelUsed, warning: chatWarning || undefined });
             return;
           }
         } catch {}
       }
 
       res.json({
-        answer: buildHumanChatAnswer(question, transcript, title || 'Video'),
+        answer: buildHumanChatAnswer(question, transcript, title || 'Video', req.body?.videoId),
+        providerUsed: 'local-extractive',
+        warning: chatWarning || undefined,
       });
     } catch (e: any) {
-      res.json({
-        answer: buildHumanChatAnswer(req.body?.question || '', req.body?.transcript || '', req.body?.title || 'Video'),
+      res.status(500).json({
+        error: e?.message || 'Chat request failed.',
       });
     }
   });
@@ -1355,7 +1601,9 @@ ${transcript.slice(0, 150000)}
       }> = [];
 
       const urlsToTry = [
-        `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(q)}&startIndex=${startIndex}&maxResults=${maxResults}&printType=books&langRestrict=en&key=${GOOGLE_API_KEY}`,
+        ...(GOOGLE_API_KEY
+          ? [`https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(q)}&startIndex=${startIndex}&maxResults=${maxResults}&printType=books&langRestrict=en&key=${GOOGLE_API_KEY}`]
+          : []),
         `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(q)}&startIndex=${startIndex}&maxResults=${maxResults}&printType=books&langRestrict=en`,
       ];
 
@@ -2042,19 +2290,30 @@ ${transcript.slice(0, 150000)}
     }
   });
 
-  // 7b. GET /api/image-proxy - Server-side Image Proxy to bypass hotlink/CORS/mixed-content blocks and reject 1x1 blank pixels
+  // 7b. GET /api/image-proxy - Server-side Image Proxy with SSRF protection, size cap, and raster-only MIME validation (C-07)
+  const ALLOWED_IMAGE_MIMES = new Set([
+    'image/jpeg',
+    'image/jpg',
+    'image/png',
+    'image/webp',
+    'image/gif',
+    'image/avif',
+  ]);
+  const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 5MB cap
+
   app.get('/api/image-proxy', async (req: Request, res: Response) => {
     try {
       const rawUrl = ((req.query.url as string) || '').trim();
-      if (!rawUrl || !/^https?:\/\//i.test(rawUrl)) {
+      if (!rawUrl || !(await isSafePublicUrl(rawUrl))) {
         res.status(400).end();
         return;
       }
       const upstream = await fetch(rawUrl, {
+        redirect: 'error',
         headers: {
           'User-Agent':
             'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-          Accept: 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+          Accept: 'image/avif,image/webp,image/apng,image/png,image/jpeg,image/gif;q=0.8',
         },
         signal: AbortSignal.timeout(5000),
       });
@@ -2062,19 +2321,25 @@ ${transcript.slice(0, 150000)}
         res.status(404).end();
         return;
       }
-      const contentType = upstream.headers.get('content-type') || '';
-      if (!contentType.startsWith('image/')) {
-        res.status(404).end();
+      const rawContentType = (upstream.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+      if (!ALLOWED_IMAGE_MIMES.has(rawContentType)) {
+        res.status(415).end();
+        return;
+      }
+      const contentLengthHeader = Number(upstream.headers.get('content-length') || 0);
+      if (contentLengthHeader > MAX_IMAGE_BYTES) {
+        res.status(413).end();
         return;
       }
       const arrayBuf = await upstream.arrayBuffer();
-      const buf = Buffer.from(arrayBuf);
-      // Reject 1x1 blank placeholder images (< 160 bytes)
-      if (buf.length < 160) {
+      if (arrayBuf.byteLength > MAX_IMAGE_BYTES || arrayBuf.byteLength < 160) {
         res.status(404).end();
         return;
       }
-      res.setHeader('Content-Type', contentType);
+      const buf = Buffer.from(arrayBuf);
+      res.setHeader('Content-Type', rawContentType);
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'none'; script-src 'none'");
       res.setHeader('Cache-Control', 'public, max-age=86400');
       res.send(buf);
     } catch {
@@ -2979,11 +3244,18 @@ ${transcript.slice(0, 150000)}
       // 1. If Gemini Studio Voice requested (e.g., studio:gemini:Kore, Puck, Charon, Fenrir, Aoede, Zephyr)
       if (voiceName.startsWith('studio:gemini:') && process.env.GEMINI_API_KEY) {
         const geminiVoice = voiceName.replace('studio:gemini:', '') || 'Kore';
-        const ttsModel = 'gemini-2.5-flash-preview-tts';
+        const ttsModel = 'gemini-3.8-flash-lite-tts';
         const cooldownExpiry = modelCooldownUntil.get(ttsModel) || 0;
         if (Date.now() >= cooldownExpiry) {
           try {
-            const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+            const ai = new GoogleGenAI({
+              apiKey: process.env.GEMINI_API_KEY,
+              httpOptions: {
+                headers: {
+                  'User-Agent': 'aistudio-build',
+                },
+              },
+            });
             const response = await ai.models.generateContent({
               model: ttsModel,
               contents: [{ parts: [{ text: cleanText.slice(0, 1200) }] }],
@@ -3062,7 +3334,7 @@ ${transcript.slice(0, 150000)}
                 audioBase64: ttsData.audioContent,
                 mimeType: 'audio/mp3',
               };
-              ttsAudioCache.set(cacheKey, resultPayload);
+              setBoundedCache(ttsAudioCache, cacheKey, resultPayload, 120);
               res.json({ ok: true, ...resultPayload });
               return;
             }
@@ -3093,7 +3365,7 @@ ${transcript.slice(0, 150000)}
               audioBase64: base64,
               mimeType: 'audio/mp3',
             };
-            ttsAudioCache.set(cacheKey, resultPayload);
+            setBoundedCache(ttsAudioCache, cacheKey, resultPayload, 120);
             res.json({ ok: true, ...resultPayload });
             return;
           }
@@ -3806,10 +4078,11 @@ ${transcript.slice(0, 150000)}
     }
   });
 
-  // 15. GET /api/dictionary-knowledge - High-Grade Multi-Dictionary, Wiktionary, StackOverflow Tech Wiki, Datamuse Semantic Graph, Wikidata & Wikipedia Summary
+  // 15. GET /api/dictionary-knowledge - 12-Source Knowledge Graph, Lexical Dictionary, Wiktionary, StackOverflow Tech Wiki, Datamuse Semantic Graph, Wikidata, Wikipedia, OpenAlex, arXiv, OpenLibrary & Plain-English Synthesizer
   app.get('/api/dictionary-knowledge', async (req: Request, res: Response) => {
     try {
       const q = ((req.query.q as string) || '').trim();
+      const videoContext = ((req.query.context as string) || '').trim();
       if (!q) {
         res.status(400).json({ error: 'Query parameter (q) is required.' });
         return;
@@ -3821,18 +4094,34 @@ ${transcript.slice(0, 150000)}
       const wiktionaryDefinitions: Array<{ partOfSpeech: string; definition: string }> = [];
       let technicalWiki: { tag: string; excerpt: string; url: string; source: string } | undefined;
       let duckDuckGoAbstract: { heading: string; abstract: string; url: string; source: string } | undefined;
+      const academicPapers: Array<{
+        title: string;
+        authors: string;
+        year?: string | number;
+        citationCount?: number;
+        url: string;
+        source: string;
+      }> = [];
+      const books: Array<{
+        title: string;
+        author: string;
+        year?: string | number;
+        url: string;
+      }> = [];
+      const sourcesUsed = new Set<string>();
       const synonymsSet = new Set<string>();
       const relatedTerms: Array<{ word: string; score?: number; def?: string }> = [];
       let wikidata: { id: string; label: string; description: string; url: string; aliases?: string[] } | undefined;
       let wikipedia: { title: string; extract: string; url: string; thumbnailUrl?: string } | undefined;
 
+      const isSingleWord = !/\s/.test(q.trim());
+
       await Promise.allSettled([
-        // 1. Google / Free Dictionary API (phonetics, audio pronunciation, definitions, synonyms)
+        // 1. Free Dictionary API (only match full query or hyphenated phrase, never split multi-word concepts into first word)
         (async () => {
-          const candidates = [
-            q.trim().toLowerCase(),
-            q.split(/\s+/)[0].replace(/[^a-zA-Z-]/g, '').toLowerCase(),
-          ].filter(Boolean);
+          const candidates = isSingleWord
+            ? [q.trim().toLowerCase(), q.replace(/[^a-zA-Z-]/g, '').toLowerCase()].filter(Boolean)
+            : [q.trim().toLowerCase()];
 
           for (const candidate of Array.from(new Set(candidates))) {
             const dictUrl = `https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(candidate)}`;
@@ -3841,6 +4130,7 @@ ${transcript.slice(0, 150000)}
               const dData = (await dRes.json()) as any[];
               const entry = dData?.[0];
               if (entry) {
+                sourcesUsed.add('Free Dictionary API');
                 phonetic = phonetic || entry.phonetic || entry.phonetics?.find((p: any) => p.text)?.text;
                 audioUrl = audioUrl || entry.phonetics?.find((p: any) => p.audio)?.audio;
                 for (const meaning of entry.meanings || []) {
@@ -3850,7 +4140,7 @@ ${transcript.slice(0, 150000)}
                       partOfSpeech: meaning.partOfSpeech || 'term',
                       definition: def.definition,
                       example: def.example,
-                      source: 'Google / Free Dictionary',
+                      source: 'Lexical Dictionary',
                     });
                   }
                 }
@@ -3860,9 +4150,9 @@ ${transcript.slice(0, 150000)}
           }
         })(),
 
-        // 2. Wiktionary Open-Source Dictionary API (multi-sense open-source definitions & computing terminology)
+        // 2. Wiktionary Open-Source Dictionary API
         (async () => {
-          const candidates = [q.trim(), q.trim().toLowerCase(), q.split(/\s+/)[0].replace(/[^a-zA-Z-]/g, '').toLowerCase()].filter(Boolean);
+          const candidates = [q.trim(), q.trim().toLowerCase()].filter(Boolean);
           for (const termCandidate of Array.from(new Set(candidates))) {
             const wtUrl = `https://en.wiktionary.org/api/rest_v1/page/definition/${encodeURIComponent(termCandidate)}`;
             const wtRes = await fetch(wtUrl, {
@@ -3891,12 +4181,15 @@ ${transcript.slice(0, 150000)}
                   }
                 }
               }
-              if (wiktionaryDefinitions.length > 0) break;
+              if (wiktionaryDefinitions.length > 0) {
+                sourcesUsed.add('Wiktionary');
+                break;
+              }
             }
           }
         })(),
 
-        // 3. StackOverflow / StackExchange Engineering Tag Wiki API (CSE, AI & Software Engineering definitions)
+        // 3. StackOverflow / StackExchange Engineering Tag Wiki API
         (async () => {
           const tagSlug = q
             .toLowerCase()
@@ -3921,6 +4214,7 @@ ${transcript.slice(0, 150000)}
                 .replace(/<[^>]+>/g, '')
                 .trim();
               if (cleanExcerpt.length > 15) {
+                sourcesUsed.add('StackOverflow Tech Wiki');
                 technicalWiki = {
                   tag: wikiItem.tag_name || tagSlug,
                   excerpt: cleanExcerpt,
@@ -3947,6 +4241,7 @@ ${transcript.slice(0, 150000)}
                 def: rawDef,
               });
             }
+            if (relatedTerms.length > 0) sourcesUsed.add('Datamuse Concept Graph');
           }
         })(),
 
@@ -3960,11 +4255,12 @@ ${transcript.slice(0, 150000)}
           if (wdRes.ok) {
             const wdData = (await wdRes.json()) as any;
             const top = wdData.search?.[0];
-            if (top) {
+            if (top && top.description) {
+              sourcesUsed.add('Wikidata Knowledge Graph');
               wikidata = {
                 id: top.id,
                 label: top.label || q,
-                description: top.description || 'Structured Wikidata Knowledge Graph Entity',
+                description: top.description,
                 url: top.concepturi || `https://www.wikidata.org/wiki/${top.id}`,
                 aliases: Array.isArray(top.aliases) ? top.aliases.slice(0, 6) : undefined,
               };
@@ -3972,7 +4268,7 @@ ${transcript.slice(0, 150000)}
           }
         })(),
 
-        // 6. Wikipedia REST v1 Summary API + Search Fallback for Technical & CSE Terms
+        // 6. Wikipedia REST v1 Summary API + Search Fallback
         (async () => {
           const wikiSlug = encodeURIComponent(q.trim().replace(/\s+/g, '_'));
           const wpUrl = `https://en.wikipedia.org/api/rest_v1/page/summary/${wikiSlug}`;
@@ -3983,6 +4279,7 @@ ${transcript.slice(0, 150000)}
           if (wpRes.ok) {
             const wpData = (await wpRes.json()) as any;
             if (wpData.extract && wpData.type !== 'disambiguation') {
+              sourcesUsed.add('Wikipedia Encyclopedia');
               wikipedia = {
                 title: wpData.title || q,
                 extract: wpData.extract,
@@ -3992,7 +4289,6 @@ ${transcript.slice(0, 150000)}
               return;
             }
           }
-          // Fallback: Wikipedia search API for best matching technical article
           const searchUrl = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(q)}&utf8=&format=json&srlimit=1`;
           const sRes = await fetch(searchUrl, {
             headers: { 'User-Agent': 'OpenTranscriptAI/1.0' },
@@ -4010,6 +4306,7 @@ ${transcript.slice(0, 150000)}
               if (wpRes2.ok) {
                 const wpData2 = (await wpRes2.json()) as any;
                 if (wpData2.extract) {
+                  sourcesUsed.add('Wikipedia Encyclopedia');
                   wikipedia = {
                     title: wpData2.title || bestTitle,
                     extract: wpData2.extract,
@@ -4022,13 +4319,14 @@ ${transcript.slice(0, 150000)}
           }
         })(),
 
-        // 7. DuckDuckGo Instant Answer Technical Abstract API
+        // 7. DuckDuckGo Instant Answer Encyclopedia API
         (async () => {
           const ddgUrl = `https://api.duckduckgo.com/?q=${encodeURIComponent(q)}&format=json&no_html=1&skip_disambig=1`;
           const ddgRes = await fetch(ddgUrl, { signal: AbortSignal.timeout(3500) });
           if (ddgRes.ok) {
             const ddgData = (await ddgRes.json()) as any;
             if (ddgData.AbstractText && String(ddgData.AbstractText).trim().length > 20) {
+              sourcesUsed.add('DuckDuckGo Encyclopedia');
               duckDuckGoAbstract = {
                 heading: ddgData.Heading || q,
                 abstract: String(ddgData.AbstractText).trim(),
@@ -4036,6 +4334,119 @@ ${transcript.slice(0, 150000)}
                 source: ddgData.AbstractSource || 'DuckDuckGo Instant Answer',
               };
             }
+          }
+        })(),
+
+        // 8. OpenAlex Peer-Reviewed Academic Papers & Concepts API
+        (async () => {
+          const oaUrl = `https://api.openalex.org/works?search=${encodeURIComponent(q)}&per-page=3&sort=cited_by_count:desc`;
+          const oaRes = await fetch(oaUrl, {
+            headers: { 'User-Agent': 'OpenTranscriptAI/1.0 (mailto:research@opentranscript.org)' },
+            signal: AbortSignal.timeout(4000),
+          });
+          if (oaRes.ok) {
+            const oaData = (await oaRes.json()) as any;
+            for (const work of (oaData.results || []).slice(0, 3)) {
+              if (!work.title) continue;
+              const authors = (work.authorships || [])
+                .slice(0, 3)
+                .map((a: any) => a.author?.display_name)
+                .filter(Boolean)
+                .join(', ');
+              academicPapers.push({
+                title: String(work.title),
+                authors: authors || 'Academic Research Team',
+                year: work.publication_year,
+                citationCount: work.cited_by_count,
+                url: work.doi || work.primary_location?.landing_page_url || `https://openalex.org/${work.id}`,
+                source: 'OpenAlex Peer-Reviewed',
+              });
+            }
+            if (academicPapers.length > 0) sourcesUsed.add('OpenAlex Academic Index');
+          }
+        })(),
+
+        // 9. Crossref Scholarly DOI Registry API
+        (async () => {
+          const crUrl = `https://api.crossref.org/works?query=${encodeURIComponent(q)}&rows=2&sort=is-referenced-by-count&order=desc`;
+          const crRes = await fetch(crUrl, {
+            headers: { 'User-Agent': 'OpenTranscriptAI/1.0 (mailto:research@opentranscript.org)' },
+            signal: AbortSignal.timeout(4000),
+          });
+          if (crRes.ok) {
+            const crData = (await crRes.json()) as any;
+            for (const item of (crData.message?.items || []).slice(0, 2)) {
+              const title = Array.isArray(item.title) ? item.title[0] : item.title;
+              if (!title) continue;
+              const authors = Array.isArray(item.author)
+                ? item.author
+                    .slice(0, 3)
+                    .map((a: any) => [a.given, a.family].filter(Boolean).join(' '))
+                    .filter(Boolean)
+                    .join(', ')
+                : 'Peer-Reviewed Journal Author';
+              const year =
+                item.published?.['date-parts']?.[0]?.[0] ||
+                item['published-print']?.['date-parts']?.[0]?.[0] ||
+                item.created?.['date-parts']?.[0]?.[0];
+              academicPapers.push({
+                title: String(title).replace(/<[^>]+>/g, ''),
+                authors: authors || 'Published Researcher',
+                year,
+                citationCount: item['is-referenced-by-count'],
+                url: item.URL || (item.DOI ? `https://doi.org/${item.DOI}` : `https://search.crossref.org/?q=${encodeURIComponent(q)}`),
+                source: 'Crossref DOI Registry',
+              });
+            }
+            if ((crData.message?.items || []).length > 0) sourcesUsed.add('Crossref DOI Registry');
+          }
+        })(),
+
+        // 10. arXiv Scientific Preprints API (STEM, CS, AI, Physics & Math)
+        (async () => {
+          const arxivUrl = `https://export.arxiv.org/api/query?search_query=all:${encodeURIComponent(q)}&start=0&max_results=2`;
+          const axRes = await fetch(arxivUrl, { signal: AbortSignal.timeout(4000) });
+          if (axRes.ok) {
+            const xml = await axRes.text();
+            const entries = xml.match(/<entry>[\s\S]*?<\/entry>/g) || [];
+            for (const entryXml of entries.slice(0, 2)) {
+              const titleMatch = entryXml.match(/<title>([\s\S]*?)<\/title>/);
+              const idMatch = entryXml.match(/<id>([\s\S]*?)<\/id>/);
+              const pubMatch = entryXml.match(/<published>(\d{4})/);
+              const authorMatches = Array.from(entryXml.matchAll(/<name>([\s\S]*?)<\/name>/g)).map((m) => m[1].trim());
+              if (titleMatch && idMatch) {
+                const cleanTitle = titleMatch[1].replace(/\s+/g, ' ').trim();
+                if (cleanTitle && cleanTitle.toLowerCase() !== 'error') {
+                  academicPapers.push({
+                    title: cleanTitle,
+                    authors: authorMatches.slice(0, 3).join(', ') || 'arXiv Researcher',
+                    year: pubMatch ? pubMatch[1] : undefined,
+                    url: idMatch[1].trim(),
+                    source: 'arXiv Preprint Archive',
+                  });
+                  sourcesUsed.add('arXiv Preprint Archive');
+                }
+              }
+            }
+          }
+        })(),
+
+        // 11. OpenLibrary Published Books & Literature API
+        (async () => {
+          const olUrl = `https://openlibrary.org/search.json?q=${encodeURIComponent(q)}&limit=3`;
+          const olRes = await fetch(olUrl, { signal: AbortSignal.timeout(4000) });
+          if (olRes.ok) {
+            const olData = (await olRes.json()) as any;
+            for (const docItem of (olData.docs || []).slice(0, 3)) {
+              if (!docItem.title) continue;
+              books.push({
+                title: String(docItem.title),
+                author: Array.isArray(docItem.author_name) ? docItem.author_name.slice(0, 2).join(', ') : 'Published Author',
+                year: docItem.first_publish_year,
+                url: docItem.key ? `https://openlibrary.org${docItem.key}` : `https://openlibrary.org/search?q=${encodeURIComponent(q)}`,
+              });
+            }
+            if (books.length > 0) sourcesUsed.add('OpenLibrary Books');
           }
         })(),
       ]);
@@ -4051,16 +4462,112 @@ ${transcript.slice(0, 150000)}
         }
       }
 
+      // If technicalWiki or duckDuckGoAbstract has a strong definition and definitions is empty, include it
+      if (definitions.length === 0 && technicalWiki) {
+        definitions.push({
+          partOfSpeech: 'technical concept',
+          definition: technicalWiki.excerpt,
+          source: technicalWiki.source,
+        });
+      }
+
+      // 12. Build an accurate, human-friendly plainEnglish & technical breakdown from verified sources (with Gemini enrichment)
+      let plainEnglish:
+        | {
+            summary: string;
+            whyItMatters: string;
+            realWorldExample?: string;
+            technicalArchitecture?: string;
+            fullForm?: string;
+            domain?: string;
+          }
+        | undefined;
+      const primarySourceText =
+        wikipedia?.extract ||
+        duckDuckGoAbstract?.abstract ||
+        technicalWiki?.excerpt ||
+        definitions[0]?.definition ||
+        wikidata?.description ||
+        '';
+
+      if (process.env.GEMINI_API_KEY) {
+        try {
+          const ai = new GoogleGenAI({
+            apiKey: process.env.GEMINI_API_KEY,
+            httpOptions: { headers: { 'User-Agent': 'aistudio-build' } },
+          });
+          const resp = await ai.models.generateContent({
+            model: 'gemini-3.1-flash-lite',
+            contents: `Explain the concept, person, term, acronym, or phrase "${q}" in clear, accurate, everyday English${
+              videoContext ? ` (mentioned in the context of: "${videoContext.slice(0, 300)}")` : ''
+            }.
+${primarySourceText ? `Reference Facts: ${primarySourceText.slice(0, 650)}\n` : ''}
+Respond strictly as JSON with these keys:
+{
+  "fullForm": "Expanded full name or 3-6 word subtitle explaining what it stands for",
+  "domain": "Best-fit category (e.g. AI & Machine Learning, CSE & Algorithms, Systems & Cloud, Science & Medicine, History & Culture, Business & Strategy)",
+  "summary": "2 clear, accurate sentences explaining what it means in plain, user-friendly English without jargon.",
+  "whyItMatters": "1-2 sentences explaining why this concept or term matters in practice.",
+  "technicalArchitecture": "1-2 sentences explaining how it works under the hood or its deeper mechanism/background.",
+  "realWorldExample": "1 concrete, relatable real-world example."
+}`,
+            config: { temperature: 0.2, maxOutputTokens: 450 },
+          });
+          const rawJson = (resp.text || '')
+            .replace(/^```(?:json)?\s*/i, '')
+            .replace(/\s*```$/, '')
+            .trim();
+          const parsedPlain = JSON.parse(rawJson);
+          if (parsedPlain?.summary) {
+            plainEnglish = {
+              summary: String(parsedPlain.summary),
+              whyItMatters: String(parsedPlain.whyItMatters || ''),
+              realWorldExample: parsedPlain.realWorldExample ? String(parsedPlain.realWorldExample) : undefined,
+              technicalArchitecture: parsedPlain.technicalArchitecture
+                ? String(parsedPlain.technicalArchitecture)
+                : undefined,
+              fullForm: parsedPlain.fullForm ? String(parsedPlain.fullForm) : undefined,
+              domain: parsedPlain.domain ? String(parsedPlain.domain) : undefined,
+            };
+            sourcesUsed.add('AI Knowledge Synthesis');
+          }
+        } catch {
+          // Fallback to deterministic synthesis below
+        }
+      }
+
+      if (!plainEnglish && primarySourceText) {
+        const sents = primarySourceText.split(/(?<=[.!?])\s+/).filter(Boolean);
+        plainEnglish = {
+          fullForm: wikidata?.description || wikipedia?.title || undefined,
+          summary: sents.slice(0, 2).join(' ') || primarySourceText,
+          whyItMatters:
+            wikidata?.description ||
+            sents[2] ||
+            (technicalWiki?.excerpt ? technicalWiki.excerpt.split(/(?<=[.!?])\s+/)[0] : '') ||
+            sents[0] ||
+            '',
+          technicalArchitecture:
+            technicalWiki?.excerpt ||
+            (wikipedia?.extract ? wikipedia.extract.split(/(?<=[.!?])\s+/).slice(1, 3).join(' ') : undefined),
+          realWorldExample: definitions.find((d) => d.example)?.example,
+        };
+      }
+
       res.json({
         ok: true,
         result: {
           query: q,
           phonetic,
           audioUrl,
+          plainEnglish,
           definitions,
           wiktionaryDefinitions: wiktionaryDefinitions.slice(0, 6),
           technicalWiki,
           duckDuckGoAbstract,
+          academicPapers: academicPapers.slice(0, 5),
+          books: books.slice(0, 4),
+          sourcesUsed: Array.from(sourcesUsed),
           synonyms: Array.from(synonymsSet).slice(0, 12),
           relatedTerms,
           wikidata,
@@ -4069,6 +4576,152 @@ ${transcript.slice(0, 150000)}
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message || 'Dictionary knowledge lookup failed' });
+    }
+  });
+
+  // 15b. POST /api/extract-key-ideas - Deep AI + Multi-Source Key Ideas & Crucial Words Extractor for Any Video
+  const keyIdeasCache = new Map<string, { terms: any[]; takeaways: any[] }>();
+  app.post('/api/extract-key-ideas', async (req: Request, res: Response) => {
+    try {
+      const { videoTitle = '', summaryMarkdown = '', transcriptSample = '' } = req.body || {};
+      const combinedInput = `${videoTitle}\n${summaryMarkdown.slice(0, 6000)}\n${transcriptSample.slice(0, 4000)}`.trim();
+      if (!combinedInput || combinedInput.length < 30) {
+        res.json({ ok: true, terms: [], takeaways: [] });
+        return;
+      }
+
+      const cacheKey = `${videoTitle.slice(0, 80)}_${combinedInput.length}_${combinedInput.slice(0, 120)}`;
+      if (keyIdeasCache.has(cacheKey)) {
+        res.json({ ok: true, ...keyIdeasCache.get(cacheKey)! });
+        return;
+      }
+
+      if (!process.env.GEMINI_API_KEY) {
+        res.json({ ok: true, terms: [], takeaways: [] });
+        return;
+      }
+
+      const ai = new GoogleGenAI({
+        apiKey: process.env.GEMINI_API_KEY,
+        httpOptions: { headers: { 'User-Agent': 'aistudio-build' } },
+      });
+
+      const prompt = `You are an expert educator and knowledge curator. Analyze the following video title, summary, and transcript excerpt, and extract the most accurate, user-friendly Key Ideas (big lessons/principles) and Key Words (important terms, concepts, acronyms, people, or institutions).
+
+RULES:
+- Write in warm, crystal-clear, everyday human English. Never use robotic filler or generic placeholders.
+- Every term and key idea MUST be 100% grounded in the actual video content.
+- Include exact timestamps (like "02:15" or "11:40") if mentioned in the text.
+
+Video Title: ${videoTitle}
+Content:
+${combinedInput.slice(0, 8500)}
+
+Return strictly valid JSON matching this structure:
+{
+  "takeaways": [
+    {
+      "principle": "Clear, memorable 4-9 word title of the core idea",
+      "description": "2 clear, accurate sentences explaining the insight in plain English.",
+      "quote": "Exact or near-exact memorable quote from the speaker (or empty string if none)",
+      "actionableLesson": "1 concrete, practical way the viewer can apply this idea in real life.",
+      "formattedTime": "MM:SS if known, else empty string",
+      "category": "mindset" | "decision_making" | "execution" | "craft"
+    }
+  ],
+  "terms": [
+    {
+      "term": "Exact term, concept, acronym, or entity name",
+      "fullForm": "Full expanded name or clear 3-6 word subtitle",
+      "category": "acronym" | "core_concept" | "entity" | "rule_of_thumb",
+      "definition": "Clear, accurate 1-2 sentence explanation in plain English.",
+      "whyItMatters": "1 sentence on why this term matters in the video and in the real world.",
+      "realWorldExample": "1 concrete real-world example illustrating this term.",
+      "contextInVideo": "How the speaker specifically used or discussed this in the video.",
+      "formattedTime": "MM:SS if known, else empty string",
+      "importance": "critical" | "high" | "recommended",
+      "tag": "Short human-friendly badge (e.g. Core Concept, Abbreviation, Person / Organization, Mental Model)"
+    }
+  ]
+}
+Provide 4 to 6 takeaways and 8 to 14 terms.`;
+
+      let parsed: { takeaways?: any[]; terms?: any[] } | null = null;
+      for (const modelName of ['gemini-3.1-flash-lite', 'gemini-flash-latest', 'gemini-3.8-flash']) {
+        try {
+          const resp = await ai.models.generateContent({
+            model: modelName,
+            contents: prompt,
+            config: { temperature: 0.2, maxOutputTokens: 2800 },
+          });
+          const rawText = (resp.text || '')
+            .replace(/^```(?:json)?\s*/i, '')
+            .replace(/\s*```$/, '')
+            .trim();
+          const jsonStart = rawText.indexOf('{');
+          const jsonEnd = rawText.lastIndexOf('}');
+          if (jsonStart !== -1 && jsonEnd > jsonStart) {
+            parsed = JSON.parse(rawText.slice(jsonStart, jsonEnd + 1));
+            if (parsed && (Array.isArray(parsed.terms) || Array.isArray(parsed.takeaways))) {
+              break;
+            }
+          }
+        } catch {
+          // Try next model in fallback chain
+        }
+      }
+
+      const buildSourcesForQuery = (qStr: string) => {
+        const clean = encodeURIComponent(qStr.replace(/\(.*?\)/g, '').trim());
+        return [
+          { label: 'Wikipedia', url: `https://en.wikipedia.org/wiki/Special:Search?search=${clean}` },
+          { label: 'Wiktionary', url: `https://en.wiktionary.org/wiki/Special:Search?search=${clean}` },
+          { label: 'OpenAlex Research', url: `https://openalex.org/works?search=${clean}` },
+          { label: 'Google Scholar', url: `https://scholar.google.com/scholar?q=${clean}` },
+          { label: 'Wikidata Graph', url: `https://www.wikidata.org/w/index.php?search=${clean}` },
+        ];
+      };
+
+      const cleanTerms = (parsed?.terms || [])
+        .filter((t: any) => t && t.term && t.definition)
+        .map((t: any) => ({
+          term: String(t.term).trim(),
+          fullForm: t.fullForm ? String(t.fullForm).trim() : undefined,
+          category: ['acronym', 'core_concept', 'entity', 'rule_of_thumb'].includes(t.category)
+            ? t.category
+            : 'core_concept',
+          definition: String(t.definition).trim(),
+          whyItMatters: t.whyItMatters ? String(t.whyItMatters).trim() : undefined,
+          realWorldExample: t.realWorldExample ? String(t.realWorldExample).trim() : undefined,
+          contextInVideo: t.contextInVideo ? String(t.contextInVideo).trim() : undefined,
+          formattedTime: t.formattedTime ? String(t.formattedTime).replace(/[\[\]]/g, '').trim() : undefined,
+          importance: ['critical', 'high', 'recommended'].includes(t.importance) ? t.importance : 'high',
+          tag: t.tag ? String(t.tag).trim() : 'Key Concept',
+          sources: buildSourcesForQuery(t.fullForm || t.term),
+        }));
+
+      const cleanTakeaways = (parsed?.takeaways || [])
+        .filter((tk: any) => tk && tk.principle && tk.description)
+        .map((tk: any, idx: number) => ({
+          id: `ai-takeaway-${idx + 1}`,
+          principle: String(tk.principle).trim(),
+          description: String(tk.description).trim(),
+          quote: tk.quote ? String(tk.quote).trim() : undefined,
+          actionableLesson: tk.actionableLesson ? String(tk.actionableLesson).trim() : '',
+          formattedTime: tk.formattedTime ? String(tk.formattedTime).replace(/[\[\]]/g, '').trim() : undefined,
+          category: ['mindset', 'decision_making', 'execution', 'craft'].includes(tk.category)
+            ? tk.category
+            : 'mindset',
+          sources: buildSourcesForQuery(tk.principle),
+        }));
+
+      const payload = { terms: cleanTerms, takeaways: cleanTakeaways };
+      if (cleanTerms.length > 0 || cleanTakeaways.length > 0) {
+        keyIdeasCache.set(cacheKey, payload);
+      }
+      res.json({ ok: true, ...payload });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Key ideas extraction failed' });
     }
   });
 
@@ -4114,7 +4767,7 @@ ${transcript.slice(0, 150000)}
             const dlData = (await dlRes.json()) as any;
             const dlText = dlData.translations?.[0]?.text;
             if (dlText) {
-              translationCache.set(cacheKey, dlText);
+              setBoundedCache(translationCache, cacheKey, dlText, 80);
               res.json({
                 ok: true,
                 translatedText: dlText,

@@ -1,296 +1,635 @@
 import { XMLParser } from 'fast-xml-parser';
+import { GoogleGenAI } from '@google/genai';
+import {
+  ParsedSegment,
+  extractVideoId,
+  formatTime,
+  parseVttOrSrt,
+  parseJsonTranscript,
+  parseTimestampedLines,
+  segmentPlainText,
+  unescapeHtml,
+} from '../utils/subtitleParser.ts';
 
-export interface ParsedSegment {
-  start: number;
-  duration: number;
-  text: string;
-  formattedTime: string;
+export {
+  type ParsedSegment,
+  extractVideoId,
+  formatTime,
+  parseVttOrSrt,
+  parseJsonTranscript,
+  parseTimestampedLines,
+  segmentPlainText,
+  unescapeHtml,
+};
+
+export interface VideoTranscriptContext {
+  title?: string;
+  authorName?: string;
+  description?: string;
 }
 
-export function extractVideoId(urlOrId: string): string | null {
-  if (!urlOrId) return null;
-  const trimmed = urlOrId.trim();
+const transcriptCache = new Map<string, ParsedSegment[]>();
 
-  // If it's already an 11-char ID
-  if (/^[a-zA-Z0-9_-]{11}$/.test(trimmed)) {
-    return trimmed;
+function cacheTranscript(videoId: string, segments: ParsedSegment[]) {
+  if (!videoId || segments.length === 0) return;
+  if (transcriptCache.size >= 200 && !transcriptCache.has(videoId)) {
+    const oldest = transcriptCache.keys().next().value;
+    if (oldest) transcriptCache.delete(oldest);
+  }
+  transcriptCache.set(videoId, segments);
+}
+
+export function parseTtmlTimeToSeconds(timeStr: string): number {
+  if (!timeStr) return 0;
+  const s = String(timeStr).trim();
+  if (s.includes(':')) {
+    const parts = s.split(':');
+    if (parts.length === 3) {
+      return (parseFloat(parts[0]) || 0) * 3600 + (parseFloat(parts[1]) || 0) * 60 + (parseFloat(parts[2]) || 0);
+    } else if (parts.length === 2) {
+      return (parseFloat(parts[0]) || 0) * 60 + (parseFloat(parts[1]) || 0);
+    }
+  }
+  if (s.endsWith('ms')) {
+    return (parseFloat(s.slice(0, -2)) || 0) / 1000;
+  }
+  return parseFloat(s.replace(/s$/i, '')) || 0;
+}
+
+export function isSafePublicHttpsUrl(rawUrl: string): boolean {
+  try {
+    const u = new URL(rawUrl);
+    if (u.protocol !== 'https:') return false;
+    const host = u.hostname.toLowerCase();
+    if (
+      host === 'localhost' ||
+      host.endsWith('.local') ||
+      host.endsWith('.internal') ||
+      host === '::1' ||
+      host === '[::1]' ||
+      /^127\./.test(host) ||
+      /^10\./.test(host) ||
+      /^192\.168\./.test(host) ||
+      /^169\.254\./.test(host) ||
+      /^172\.(1[6-9]|2\d|3[0-1])\./.test(host) ||
+      /^0\./.test(host)
+    ) {
+      return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function isBlockedOrErrorPayload(text: string): boolean {
+  const lower = text.slice(0, 600).toLowerCase();
+  return (
+    lower.includes('youtube is currently blocking') ||
+    lower.includes('signinconfirmnotbotexception') ||
+    lower.includes('missing app check token') ||
+    lower.includes('piped has shutdown') ||
+    lower.includes('just a moment...') ||
+    (lower.includes('<!doctype html') && !lower.includes('<transcript') && !lower.includes('<tt'))
+  );
+}
+
+function extractTtmlNodeText(node: unknown): string {
+  if (node == null) return '';
+  if (typeof node === 'string' || typeof node === 'number') {
+    return String(node);
+  }
+  if (Array.isArray(node)) {
+    return node.map(extractTtmlNodeText).filter(Boolean).join(' ');
+  }
+  if (typeof node === 'object') {
+    const obj = node as Record<string, unknown>;
+    const chunks: string[] = [];
+    for (const [k, v] of Object.entries(obj)) {
+      if (k.startsWith('@_')) continue;
+      if (k === 'br') {
+        chunks.push(' ');
+        continue;
+      }
+      const part = extractTtmlNodeText(v);
+      if (part) chunks.push(part);
+    }
+    return chunks.join(' ');
+  }
+  return '';
+}
+
+export function parseSubtitlePayload(subText: string, allowPlainTextFallback = false): ParsedSegment[] | null {
+  if (!subText || !subText.trim()) return null;
+  if (isBlockedOrErrorPayload(subText)) return null;
+
+  const trimmed = subText.trim();
+
+  // 1. Parse TTML / XML timedtext (<tt> or <transcript><text>)
+  if (trimmed.includes('<?xml') || trimmed.includes('<tt') || trimmed.includes('<transcript')) {
+    try {
+      const parser = new XMLParser({
+        ignoreAttributes: false,
+        trimValues: false,
+      });
+      const parsed = parser.parse(trimmed);
+      const cueNodes: Array<Record<string, unknown>> = [];
+
+      function traverse(node: unknown) {
+        if (!node) return;
+        if (Array.isArray(node)) {
+          for (const item of node) traverse(item);
+        } else if (typeof node === 'object') {
+          const obj = node as Record<string, unknown>;
+          for (const tag of ['p', 'text']) {
+            if (obj[tag]) {
+              if (Array.isArray(obj[tag])) {
+                cueNodes.push(...(obj[tag] as Array<Record<string, unknown>>));
+              } else if (typeof obj[tag] === 'object') {
+                cueNodes.push(obj[tag] as Record<string, unknown>);
+              }
+            }
+          }
+          for (const key of Object.keys(obj)) {
+            if (key !== 'p' && key !== 'text') traverse(obj[key]);
+          }
+        }
+      }
+
+      traverse(parsed);
+
+      if (cueNodes.length > 0) {
+        const segments: ParsedSegment[] = [];
+        for (const p of cueNodes) {
+          const rawText = extractTtmlNodeText(p);
+          const cleanText = unescapeHtml(rawText)
+            .replace(/<\d{1,2}:\d{2}(?::\d{2})?[.,]\d{3}>/g, '')
+            .replace(/<\/?c(?:\.[^>]*)?>/gi, '')
+            .replace(/\s+/g, ' ')
+            .trim();
+          if (!cleanText || isBlockedOrErrorPayload(cleanText)) continue;
+
+          const beginAttr = String(p['@_begin'] ?? p['@_start'] ?? p['@_t'] ?? '0');
+          const endAttr = String(p['@_end'] ?? '0');
+          const durAttr = String(p['@_dur'] ?? p['@_d'] ?? '2');
+
+          const isMs = p['@_t'] !== undefined || p['@_d'] !== undefined;
+          const startSec = isMs ? (parseFloat(beginAttr) || 0) / 1000 : parseTtmlTimeToSeconds(beginAttr);
+          const endSec = parseTtmlTimeToSeconds(endAttr);
+          const dur =
+            endSec > startSec
+              ? endSec - startSec
+              : isMs
+              ? (parseFloat(durAttr) || 2000) / 1000
+              : parseTtmlTimeToSeconds(durAttr) || 2;
+
+          segments.push({
+            start: Math.round(startSec * 100) / 100,
+            duration: Math.round(Math.max(0.5, dur) * 100) / 100,
+            text: cleanText,
+            formattedTime: formatTime(startSec),
+          });
+        }
+
+        if (segments.length > 0) {
+          return segments;
+        }
+      }
+    } catch {
+      // Continue to other parsers
+    }
   }
 
-  // Handle various YouTube URL formats
-  const patterns = [
-    /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/|youtube\.com\/v\/|youtube\.com\/shorts\/)([a-zA-Z0-9_-]{11})/,
-    /[?&]v=([a-zA-Z0-9_-]{11})/,
-  ];
+  // 2. Parse WebVTT or SRT
+  if (trimmed.includes('WEBVTT') || trimmed.includes('-->')) {
+    const parsed = parseVttOrSrt(trimmed);
+    if (parsed.length > 0) return parsed;
+  }
 
-  for (const pattern of patterns) {
-    const match = trimmed.match(pattern);
-    if (match && match[1]) {
-      return match[1];
-    }
+  // 3. Parse JSON3 or JSON array/object
+  const jsonParsed = parseJsonTranscript(trimmed);
+  if (jsonParsed.length > 0) return jsonParsed;
+
+  // 4. Parse [MM:SS] or alternating YouTube timestamp lines
+  const tsParsed = parseTimestampedLines(trimmed);
+  if (tsParsed.length > 0) return tsParsed;
+
+  // 5. Optional plain text segmentation
+  if (allowPlainTextFallback) {
+    const plainParsed = segmentPlainText(trimmed);
+    if (plainParsed.length > 0) return plainParsed;
   }
 
   return null;
 }
 
-export function formatTime(seconds: number): string {
-  const totalSeconds = Math.floor(Math.max(0, seconds));
-  const hrs = Math.floor(totalSeconds / 3600);
-  const mins = Math.floor((totalSeconds % 3600) / 60);
-  const secs = totalSeconds % 60;
+function extractBalancedJsonArray(source: string, marker: string): string | null {
+  const idx = source.indexOf(marker);
+  if (idx === -1) return null;
+  const startBracket = source.indexOf('[', idx + marker.length);
+  if (startBracket === -1) return null;
 
-  if (hrs > 0) {
-    return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-  }
-  return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-}
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
 
-export function parseTtmlTimeToSeconds(timeStr: string): number {
-  if (!timeStr) return 0;
-  // formats: "00:01:23.456", "01:23.456", or "123.45s", or "123"
-  if (timeStr.includes(':')) {
-    const parts = timeStr.split(':');
-    if (parts.length === 3) {
-      return parseFloat(parts[0]) * 3600 + parseFloat(parts[1]) * 60 + parseFloat(parts[2]);
-    } else if (parts.length === 2) {
-      return parseFloat(parts[0]) * 60 + parseFloat(parts[1]);
+  for (let i = startBracket; i < source.length; i++) {
+    const ch = source[i];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (ch === '\\') {
+      escaped = true;
+      continue;
+    }
+    if (ch === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (!inString) {
+      if (ch === '[') depth++;
+      else if (ch === ']') {
+        depth--;
+        if (depth === 0) {
+          return source.slice(startBracket, i + 1);
+        }
+      }
     }
   }
-  return parseFloat(timeStr.replace('s', '')) || 0;
+  return null;
+}
+
+async function fetchCaptionTrackUrl(baseUrl: string): Promise<ParsedSegment[] | null> {
+  if (!baseUrl || !isSafePublicHttpsUrl(baseUrl)) return null;
+
+  const urlVariants = [
+    baseUrl,
+    baseUrl.includes('fmt=') ? baseUrl : `${baseUrl}&fmt=json3`,
+    baseUrl.includes('fmt=') ? baseUrl : `${baseUrl}&fmt=vtt`,
+  ];
+
+  for (const targetUrl of urlVariants) {
+    try {
+      const subRes = await fetch(targetUrl, {
+        signal: AbortSignal.timeout(4000),
+        redirect: 'error',
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+          'Accept-Language': 'en-US,en;q=0.9',
+        },
+      });
+      if (!subRes.ok) continue;
+      const subText = await subRes.text();
+      const parsed = parseSubtitlePayload(subText);
+      if (parsed && parsed.length > 0) return parsed;
+    } catch {
+      // Try next variant
+    }
+  }
+  return null;
+}
+
+// Method 1: Direct YouTube Watch Page captionTracks extraction (with balanced JSON array parser)
+async function fetchDirectYouTubeCaptions(videoId: string): Promise<ParsedSegment[] | null> {
+  try {
+    const watchRes = await fetch(`https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}&hl=en`, {
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+        'Accept-Language': 'en-US,en;q=0.9',
+        Cookie: 'SOCS=CAESEwgDEgk0ODE3Nzk3MjQaAmVuIAEaBgiA_LyaBg; CONSENT=YES+cb.20210328-17-p0.en+FX+417',
+      },
+      signal: AbortSignal.timeout(4500),
+    });
+    if (!watchRes.ok) return null;
+    const html = await watchRes.text();
+    const rawArray = extractBalancedJsonArray(html, '"captionTracks":');
+    if (!rawArray) return null;
+
+    const tracks = JSON.parse(rawArray) as Array<{ baseUrl?: string; languageCode?: string; kind?: string }>;
+    if (!Array.isArray(tracks) || tracks.length === 0) return null;
+
+    const sortedTracks = [...tracks].sort((a, b) => {
+      const aEn = a.languageCode === 'en' ? 2 : a.languageCode?.startsWith('en') ? 1 : 0;
+      const bEn = b.languageCode === 'en' ? 2 : b.languageCode?.startsWith('en') ? 1 : 0;
+      if (aEn !== bEn) return bEn - aEn;
+      const aManual = a.kind !== 'asr' ? 1 : 0;
+      const bManual = b.kind !== 'asr' ? 1 : 0;
+      return bManual - aManual;
+    });
+
+    for (const track of sortedTracks.slice(0, 3)) {
+      if (!track?.baseUrl) continue;
+      const segments = await fetchCaptionTrackUrl(track.baseUrl);
+      if (segments && segments.length > 0) return segments;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+// Method 2: YouTube Innertube Player API across multiple client contexts
+async function fetchInnertubeCaptions(videoId: string): Promise<ParsedSegment[] | null> {
+  const clients = [
+    {
+      clientName: 'WEB',
+      clientVersion: '2.20250101.00.00',
+      hl: 'en',
+      gl: 'US',
+    },
+    {
+      clientName: 'ANDROID_VR',
+      clientVersion: '1.60.19',
+      deviceMake: 'Oculus',
+      deviceModel: 'Quest 3',
+      osName: 'Android',
+      osVersion: '12L',
+      androidSdkVersion: 32,
+      hl: 'en',
+      gl: 'US',
+    },
+    {
+      clientName: 'IOS',
+      clientVersion: '19.45.4',
+      deviceMake: 'Apple',
+      deviceModel: 'iPhone16,2',
+      osName: 'iPhone',
+      osVersion: '18.1.0.22B83',
+      hl: 'en',
+      gl: 'US',
+    },
+  ];
+
+  for (const client of clients) {
+    try {
+      const res = await fetch('https://www.youtube.com/youtubei/v1/player?prettyPrint=false', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept-Language': 'en-US,en;q=0.9',
+        },
+        body: JSON.stringify({
+          context: { client },
+          videoId,
+        }),
+        signal: AbortSignal.timeout(4000),
+      });
+      if (!res.ok) continue;
+      const data = (await res.json()) as any;
+      const tracks = data?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
+      if (!Array.isArray(tracks) || tracks.length === 0) continue;
+
+      const preferred =
+        tracks.find((t: any) => t.languageCode === 'en' && t.kind !== 'asr') ||
+        tracks.find((t: any) => t.languageCode?.startsWith('en')) ||
+        tracks[0];
+
+      if (preferred?.baseUrl) {
+        const segments = await fetchCaptionTrackUrl(preferred.baseUrl);
+        if (segments && segments.length > 0) return segments;
+      }
+    } catch {
+      // Try next client
+    }
+  }
+  return null;
 }
 
 const PIPED_INSTANCES = [
   'https://api.piped.private.coffee',
   'https://pipedapi.kavin.rocks',
-  'https://pipedapi.tokhmi.xyz',
   'https://pipedapi.leptons.xyz',
   'https://piped-api.lunar.icu',
-  'https://pa.il.ax'
+  'https://pipedapi.ducks.party',
 ];
 
-export async function fetchPipedTranscript(videoId: string): Promise<ParsedSegment[] | null> {
-  for (const instance of PIPED_INSTANCES) {
-    try {
-      const res = await fetch(`${instance}/streams/${videoId}`, {
-        signal: AbortSignal.timeout(3000),
-        headers: { 'Accept': 'application/json' }
-      });
-      if (!res.ok) continue;
+const INVIDIOUS_INSTANCES = [
+  'https://inv.nadeko.net',
+  'https://invidious.nerdvpn.de',
+  'https://invidious.jing.rocks',
+  'https://invidious.privacyredirect.com',
+];
 
-      const data = await res.json() as any;
-      if (!data.subtitles || !Array.isArray(data.subtitles) || data.subtitles.length === 0) {
-        continue;
-      }
+// Method 3A: Piped API instance fetcher
+async function fetchFromSinglePipedInstance(instance: string, videoId: string): Promise<ParsedSegment[]> {
+  const res = await fetch(`${instance}/streams/${encodeURIComponent(videoId)}`, {
+    signal: AbortSignal.timeout(4500),
+    headers: { Accept: 'application/json' },
+  });
+  if (!res.ok) throw new Error(`Status ${res.status}`);
 
-      // Prioritize English or first available
-      const subTrack = data.subtitles.find((s: any) => s.code?.startsWith('en') || s.lang?.startsWith('en')) || data.subtitles[0];
-      if (!subTrack || !subTrack.url) continue;
+  const data = (await res.json()) as { subtitles?: Array<{ code?: string; lang?: string; url?: string }> };
+  if (!data.subtitles || !Array.isArray(data.subtitles) || data.subtitles.length === 0) {
+    throw new Error('No subtitles');
+  }
 
-      const subRes = await fetch(subTrack.url, { signal: AbortSignal.timeout(3000) });
-      if (!subRes.ok) continue;
+  const candidates = [
+    ...data.subtitles.filter((s) => s.code?.startsWith('en') || s.lang?.toLowerCase().startsWith('en')),
+    ...data.subtitles,
+  ].slice(0, 3);
 
-      const subText = await subRes.text();
-      if (!subText || subText.trim().length === 0) continue;
-
-      // Parse TTML or WebVTT
-      if (subText.includes('<?xml') || subText.includes('<tt')) {
-        const parser = new XMLParser({ ignoreAttributes: false });
-        const parsed = parser.parse(subText);
-        const pTags: any[] = [];
-
-        function traverse(node: any) {
-          if (!node) return;
-          if (Array.isArray(node)) {
-            for (const item of node) traverse(item);
-          } else if (typeof node === 'object') {
-            if (node.p) {
-              if (Array.isArray(node.p)) {
-                pTags.push(...node.p);
-              } else {
-                pTags.push(node.p);
-              }
-            }
-            for (const key of Object.keys(node)) {
-              if (key !== 'p') traverse(node[key]);
-            }
-          }
-        }
-
-        traverse(parsed);
-
-        if (pTags.length > 0) {
-          const segments: ParsedSegment[] = [];
-          for (const p of pTags) {
-            const rawText = p['#text'] || (typeof p === 'string' ? p : '');
-            const cleanText = unescapeHtml(String(rawText)).replace(/\[.*?\]/g, '').trim();
-            if (!cleanText) continue;
-
-            const startSec = parseTtmlTimeToSeconds(p['@_begin'] || '0');
-            const endSec = parseTtmlTimeToSeconds(p['@_end'] || '0');
-            const dur = endSec > startSec ? endSec - startSec : parseTtmlTimeToSeconds(p['@_dur'] || '2');
-
-            segments.push({
-              start: Math.round(startSec * 100) / 100,
-              duration: Math.round(dur * 100) / 100,
-              text: cleanText,
-              formattedTime: formatTime(startSec)
-            });
-          }
-
-          if (segments.length > 0) {
-            return segments;
-          }
-        }
-      } else if (subText.includes('WEBVTT') || subText.includes('-->')) {
-        return parseVttOrSrt(subText);
-      }
-    } catch (e) {
-      // Try next mirror
-      continue;
+  for (const subTrack of candidates) {
+    if (!subTrack?.url || !isSafePublicHttpsUrl(subTrack.url)) continue;
+    const subRes = await fetch(subTrack.url, {
+      signal: AbortSignal.timeout(4000),
+      redirect: 'error',
+    });
+    if (!subRes.ok) continue;
+    const subText = await subRes.text();
+    const segments = parseSubtitlePayload(subText);
+    if (segments && segments.length > 0) {
+      return segments;
     }
   }
+  throw new Error('Empty parsed segments');
+}
+
+// Method 3B: Invidious API instance fetcher
+async function fetchFromSingleInvidiousInstance(instance: string, videoId: string): Promise<ParsedSegment[]> {
+  const res = await fetch(`${instance}/api/v1/captions/${encodeURIComponent(videoId)}`, {
+    signal: AbortSignal.timeout(4500),
+    headers: { Accept: 'application/json' },
+  });
+  if (!res.ok) throw new Error(`Status ${res.status}`);
+
+  const data = (await res.json()) as { captions?: Array<{ label?: string; languageCode?: string; url?: string }> };
+  if (!data.captions || !Array.isArray(data.captions) || data.captions.length === 0) {
+    throw new Error('No Invidious captions');
+  }
+
+  const sorted = [...data.captions].sort((a, b) => {
+    const aManualEn = a.languageCode === 'en' && !a.label?.toLowerCase().includes('auto') ? 3 : 0;
+    const bManualEn = b.languageCode === 'en' && !b.label?.toLowerCase().includes('auto') ? 3 : 0;
+    if (aManualEn !== bManualEn) return bManualEn - aManualEn;
+    const aEn = a.languageCode?.startsWith('en') ? 2 : 0;
+    const bEn = b.languageCode?.startsWith('en') ? 2 : 0;
+    return bEn - aEn;
+  });
+
+  for (const track of sorted.slice(0, 3)) {
+    if (!track?.url) continue;
+    const fullUrl = track.url.startsWith('http') ? track.url : `${instance}${track.url}`;
+    if (!isSafePublicHttpsUrl(fullUrl)) continue;
+    const subRes = await fetch(fullUrl, {
+      signal: AbortSignal.timeout(4000),
+      redirect: 'error',
+    });
+    if (!subRes.ok) continue;
+    const subText = await subRes.text();
+    const segments = parseSubtitlePayload(subText);
+    if (segments && segments.length > 0) {
+      return segments;
+    }
+  }
+  throw new Error('Empty Invidious segments');
+}
+
+// Method 4: Gemini Multimodal Native YouTube Video Transcription (Google server-to-YouTube integration)
+async function fetchGeminiYoutubeTranscript(
+  videoId: string,
+  context?: VideoTranscriptContext
+): Promise<ParsedSegment[] | null> {
+  const apiKey = (process.env.GEMINI_API_KEY || '').trim();
+  if (!apiKey) return null;
+
+  const ai = new GoogleGenAI({
+    apiKey,
+    httpOptions: {
+      headers: {
+        'User-Agent': 'aistudio-build',
+      },
+    },
+  });
+
+  const youtubeUrl = `https://www.youtube.com/watch?v=${videoId}`;
+  const modelsToTry = ['gemini-3.1-flash-lite', 'gemini-flash-latest', 'gemini-3.8-flash'];
+
+  // Pass 1: Direct YouTube video URI via fileData (native Google YouTube stream access)
+  for (const modelName of modelsToTry) {
+    try {
+      const response = await ai.models.generateContent({
+        model: modelName,
+        contents: [
+          {
+            fileData: {
+              fileUri: youtubeUrl,
+              mimeType: 'video/mp4',
+            },
+          },
+          `Extract a detailed chronological transcript of this YouTube video${
+            context?.title ? ` ("${context.title}")` : ''
+          }.
+Format EVERY line strictly with its timestamp in [MM:SS] format followed by the spoken words, like this:
+[00:00] First spoken sentence or phrase here.
+[00:06] Next spoken sentence or phrase here.
+Do not include any intro or outro commentary—output ONLY the [MM:SS] transcript lines covering the video from start to finish.`,
+        ],
+        config: {
+          temperature: 0.1,
+          maxOutputTokens: 8192,
+        },
+      });
+
+      const rawText = response.text || '';
+      const parsed = parseSubtitlePayload(rawText, true);
+      if (parsed && parsed.length >= 3) {
+        return parsed;
+      }
+    } catch {
+      // Try next model in fallback chain
+    }
+  }
+
+  // Pass 2: Search-grounded transcript recovery if video has restricted embed/fileData access
+  if (context?.title) {
+    for (const modelName of modelsToTry) {
+      try {
+        const response = await ai.models.generateContent({
+          model: modelName,
+          contents: `Find the spoken transcript or detailed chronological speech breakdown for the YouTube video titled "${context.title}"${
+            context.authorName ? ` by ${context.authorName}` : ''
+          } (${youtubeUrl}).
+${context.description ? `Video Description / Notes:\n${context.description.slice(0, 2500)}\n` : ''}
+Format EVERY line strictly as:
+[MM:SS] Spoken transcript content or verbatim point from the video.
+Output at least 25 chronological [MM:SS] lines covering the full video from beginning to end. Output ONLY the [MM:SS] lines.`,
+          config: {
+            tools: [{ googleSearch: {} }],
+            temperature: 0.2,
+            maxOutputTokens: 4096,
+          },
+        });
+
+        const rawText = response.text || '';
+        const parsed = parseSubtitlePayload(rawText, false);
+        if (parsed && parsed.length >= 5) {
+          return parsed;
+        }
+      } catch {
+        // Try next model
+      }
+    }
+  }
+
   return null;
 }
 
-export function parseVttOrSrt(content: string): ParsedSegment[] {
-  const lines = content.split(/\r?\n/);
-  const segments: ParsedSegment[] = [];
-  let currentStart = 0;
-  let currentDur = 2;
-  let currentText = '';
+/**
+ * Multi-method transcript extraction pipeline:
+ * 1. In-memory cache & curated sample transcripts
+ * 2. Direct YouTube watch page captionTracks + Innertube Player API + Piped/Invidious mirrors (raced in parallel)
+ * 3. Gemini native multimodal YouTube video transcription (`fileData` -> `googleSearch` grounding)
+ */
+export async function fetchPipedTranscript(
+  videoId: string,
+  context?: VideoTranscriptContext
+): Promise<ParsedSegment[] | null> {
+  if (!videoId) return null;
 
-  const timeRegex = /(\d{1,2}:)?(\d{2}):(\d{2})[.,](\d{3})\s*-->\s*(\d{1,2}:)?(\d{2}):(\d{2})[.,](\d{3})/;
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trim();
-    if (!line) {
-      if (currentText.trim()) {
-        segments.push({
-          start: currentStart,
-          duration: currentDur,
-          text: unescapeHtml(currentText.trim()),
-          formattedTime: formatTime(currentStart),
-        });
-        currentText = '';
-      }
-      continue;
-    }
-
-    const match = line.match(timeRegex);
-    if (match) {
-      if (currentText.trim()) {
-        segments.push({
-          start: currentStart,
-          duration: currentDur,
-          text: unescapeHtml(currentText.trim()),
-          formattedTime: formatTime(currentStart),
-        });
-        currentText = '';
-      }
-
-      const startH = match[1] ? parseInt(match[1].replace(':', ''), 10) : 0;
-      const startM = parseInt(match[2], 10);
-      const startS = parseInt(match[3], 10);
-      const startMs = parseInt(match[4], 10);
-      currentStart = startH * 3600 + startM * 60 + startS + startMs / 1000;
-
-      const endH = match[5] ? parseInt(match[5].replace(':', ''), 10) : 0;
-      const endM = parseInt(match[6], 10);
-      const endS = parseInt(match[7], 10);
-      const endMs = parseInt(match[8], 10);
-      const endSec = endH * 3600 + endM * 60 + endS + endMs / 1000;
-
-      currentDur = Math.max(0.5, endSec - currentStart);
-    } else if (!line.startsWith('WEBVTT') && !line.startsWith('NOTE') && !/^\d+$/.test(line)) {
-      currentText += (currentText ? ' ' : '') + line;
-    }
+  const cached = transcriptCache.get(videoId);
+  if (cached && cached.length > 0) {
+    return cached;
   }
 
-  if (currentText.trim()) {
-    segments.push({
-      start: currentStart,
-      duration: currentDur,
-      text: unescapeHtml(currentText.trim()),
-      formattedTime: formatTime(currentStart),
-    });
+  if (SAMPLE_FALLBACK_TRANSCRIPTS[videoId]?.length) {
+    return SAMPLE_FALLBACK_TRANSCRIPTS[videoId];
   }
 
-  return segments;
+  // Stage 1: Race all fast caption track extractors in parallel
+  try {
+    const fastTasks: Array<Promise<ParsedSegment[]>> = [
+      fetchDirectYouTubeCaptions(videoId).then((r) => {
+        if (!r || r.length === 0) throw new Error('No direct captions');
+        return r;
+      }),
+      fetchInnertubeCaptions(videoId).then((r) => {
+        if (!r || r.length === 0) throw new Error('No innertube captions');
+        return r;
+      }),
+      ...PIPED_INSTANCES.map((inst) => fetchFromSinglePipedInstance(inst, videoId)),
+      ...INVIDIOUS_INSTANCES.map((inst) => fetchFromSingleInvidiousInstance(inst, videoId)),
+    ];
+
+    const fastSegments = await Promise.any(fastTasks);
+    if (fastSegments && fastSegments.length > 0) {
+      cacheTranscript(videoId, fastSegments);
+      return fastSegments;
+    }
+  } catch {
+    // All fast caption scrapers failed or were blocked by YouTube datacenter IP rules; proceed to Stage 2
+  }
+
+  // Stage 2: Native Google Gemini Multimodal YouTube Transcription
+  const geminiSegments = await fetchGeminiYoutubeTranscript(videoId, context);
+  if (geminiSegments && geminiSegments.length > 0) {
+    cacheTranscript(videoId, geminiSegments);
+    return geminiSegments;
+  }
+
+  return null;
 }
 
-export function unescapeHtml(str: string): string {
-  return str
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&apos;/g, "'")
-    .replace(/&#x27;/g, "'")
-    .replace(/&nbsp;/g, ' ');
-}
-
-// Built-in pristine transcripts for popular demo videos
-export const SAMPLE_FALLBACK_TRANSCRIPTS: Record<string, ParsedSegment[]> = {
-  'UF8uR6Z6KLc': [
-    { start: 0, duration: 12, text: "I am honored to be with you today at your commencement from one of the finest universities in the world.", formattedTime: "00:00" },
-    { start: 12, duration: 10, text: "I never graduated from college. Truth be told, this is the closest I've ever gotten to a college graduation.", formattedTime: "00:12" },
-    { start: 22, duration: 11, text: "Today I want to tell you three stories from my life. That's it. No big deal. Just three stories.", formattedTime: "00:22" },
-    { start: 33, duration: 8, text: "The first story is about connecting the dots. I dropped out of Reed College after the first 6 months.", formattedTime: "00:33" },
-    { start: 41, duration: 15, text: "Why did I drop out? It started before I was born. My biological mother was a young, unwed college graduate student, and she decided to put me up for adoption.", formattedTime: "00:41" },
-    { start: 56, duration: 14, text: "She felt very strongly that I should be adopted by college graduates, so everything was all set for me to be adopted at birth by a lawyer and his wife.", formattedTime: "00:56" },
-    { start: 70, duration: 15, text: "Except that when I popped out, they decided at the last minute that they really wanted a girl. So my parents, who were on a waiting list, got a call in the middle of the night.", formattedTime: "01:10" },
-    { start: 85, duration: 13, text: "My mother later found out that my mother had never graduated from college and that my father had never graduated from high school. She refused to sign the final adoption papers.", formattedTime: "01:25" },
-    { start: 98, duration: 12, text: "She only relented a few months later when my parents promised that I would someday go to college. This was the start in my life.", formattedTime: "01:38" },
-    { start: 110, duration: 15, text: "And 17 years later, I did go to college. But I naively chose a college that was almost as expensive as Stanford, and all of my working-class parents' savings were being spent on my college tuition.", formattedTime: "01:50" },
-    { start: 125, duration: 14, text: "After six months, I couldn't see the value in it. I had no idea what I wanted to do with my life and no idea how college was going to help me figure it out.", formattedTime: "02:05" },
-    { start: 139, duration: 12, text: "So I decided to drop out and trust that it would all work out okay. It was pretty scary at the time, but looking back it was one of the best decisions I ever made.", formattedTime: "02:19" },
-    { start: 151, duration: 15, text: "The minute I dropped out I could stop taking the required classes that didn't interest me, and begin dropping in on the ones that looked interesting.", formattedTime: "02:31" },
-    { start: 166, duration: 16, text: "Reed College at that time offered perhaps the best calligraphy instruction in the country. Throughout the campus every poster, every label on every drawer, was beautifully hand calligraphed.", formattedTime: "02:46" },
-    { start: 182, duration: 18, text: "I learned about serif and san serif typefaces, about varying the amount of space between different letter combinations, about what makes great typography great. It was beautiful, historical, artistically subtle in a way that science can't capture.", formattedTime: "03:02" },
-    { start: 200, duration: 16, text: "None of this had even a hope of any practical application in my life. But ten years later, when we were designing the first Macintosh computer, it all came back to me.", formattedTime: "03:20" },
-    { start: 216, duration: 14, text: "And we designed it all into the Mac. It was the first computer with beautiful typography. If I had never dropped in on that single course in college, the Mac would have never had multiple typefaces or proportionally spaced fonts.", formattedTime: "03:36" },
-    { start: 230, duration: 18, text: "Of course it was impossible to connect the dots looking forward when I was in college. But it was very, very clear looking backwards ten years later.", formattedTime: "03:50" },
-    { start: 248, duration: 18, text: "Again, you can't connect the dots looking forward; you can only connect them looking backwards. So you have to trust that the dots will somehow connect in your future.", formattedTime: "04:08" },
-    { start: 266, duration: 16, text: "You have to trust in something — your gut, destiny, life, karma, whatever. This approach has never let me down, and it has made all the difference in my life.", formattedTime: "04:26" },
-    { start: 282, duration: 15, text: "My second story is about love and loss. I was lucky — I found what I loved to do early in life. Woz and I started Apple in my parents' garage when I was 20.", formattedTime: "04:42" },
-    { start: 297, duration: 14, text: "We worked hard, and in 10 years Apple had grown from just the two of us in a garage into a $2 billion company with over 4,000 employees.", formattedTime: "04:57" },
-    { start: 311, duration: 15, text: "We had just released our finest creation — the Macintosh — a year earlier, and I had just turned 30. And then I got fired.", formattedTime: "05:11" },
-    { start: 326, duration: 15, text: "How can you get fired from a company you started? Well, as Apple grew we hired someone who I thought was very talented to run the company with me, and for the first year or so things went well.", formattedTime: "05:26" },
-    { start: 341, duration: 14, text: "But then our visions of the future began to diverge and eventually we had a falling out. When we did, our Board of Directors sided with him. So at 30 I was out. And very publicly out.", formattedTime: "05:41" },
-    { start: 355, duration: 16, text: "What had been the focus of my entire adult life was gone, and it was devastating. I really didn't know what to do for a few months. I felt that I had let the previous generation of entrepreneurs down.", formattedTime: "05:55" },
-    { start: 371, duration: 14, text: "I was a very public failure, and I even thought about running away from the valley. But something slowly began to dawn on me — I still loved what I did.", formattedTime: "06:11" },
-    { start: 385, duration: 15, text: "The turn of events at Apple had not changed that one bit. I had been rejected, but I was still in love. And so I decided to start over.", formattedTime: "06:25" },
-    { start: 400, duration: 18, text: "I didn't see it then, but it turned out that getting fired from Apple was the best thing that could have ever happened to me. The heaviness of being successful was replaced by the lightness of being a beginner again.", formattedTime: "06:40" },
-    { start: 418, duration: 16, text: "It freed me to enter one of the most creative periods of my life. During the next five years, I started a company named NeXT, another company named Pixar, and fell in love with an amazing woman who would become my wife.", formattedTime: "06:58" },
-    { start: 434, duration: 18, text: "Pixar went on to create the world's first computer animated feature film, Toy Story, and is now the most successful animation studio in the world.", formattedTime: "07:14" },
-    { start: 452, duration: 18, text: "In a remarkable turn of events, Apple bought NeXT, I returned to Apple, and the technology we developed at NeXT is at the heart of Apple's current renaissance. And Laurene and I have a wonderful family together.", formattedTime: "07:32" },
-    { start: 470, duration: 15, text: "I'm pretty sure none of this would have happened if I hadn't been fired from Apple. It was awful tasting medicine, but I guess the patient needed it.", formattedTime: "07:50" },
-    { start: 485, duration: 18, text: "Sometimes life hits you in the head with a brick. Don't lose faith. I'm convinced that the only thing that kept me going was that I loved what I did. You've got to find what you love.", formattedTime: "08:05" },
-    { start: 503, duration: 16, text: "And that is as true for your work as it is for your lovers. Your work is going to fill a large part of your life, and the only way to be truly satisfied is to do what you believe is great work.", formattedTime: "08:23" },
-    { start: 519, duration: 18, text: "And the only way to do great work is to love what you do. If you haven't found it yet, keep looking. Don't settle. As with all matters of the heart, you'll know when you find it.", formattedTime: "08:39" },
-    { start: 537, duration: 15, text: "My third story is about death. When I was 17, I read a quote that went something like: 'If you live each day as if it was your last, someday you'll most certainly be right.'", formattedTime: "08:57" },
-    { start: 552, duration: 16, text: "It made an impression on me, and since then, for the past 33 years, I have looked in the mirror every morning and asked myself: 'If today were the last day of my life, would I want to do what I am about to do today?'", formattedTime: "09:12" },
-    { start: 568, duration: 16, text: "Remembering that I'll be dead soon is the most important tool I've ever encountered to help me make the big choices in life.", formattedTime: "09:28" },
-    { start: 584, duration: 18, text: "Because almost everything — all external expectations, all pride, all fear of embarrassment or failure — these things just fall away in the face of death, leaving only what is truly important.", formattedTime: "09:44" },
-    { start: 602, duration: 18, text: "Remembering that you are going to die is the best way I know to avoid the trap of thinking you have something to lose. You are already naked. There is no reason not to follow your heart.", formattedTime: "10:02" },
-    { start: 620, duration: 17, text: "About a year ago I was diagnosed with cancer. I had a scan at 7:30 in the morning, and it clearly showed a tumor on my pancreas.", formattedTime: "10:20" },
-    { start: 637, duration: 18, text: "The doctors told me this was almost certainly a type of cancer that is incurable, and that I should expect to live no longer than three to six months.", formattedTime: "10:37" },
-    { start: 655, duration: 20, text: "My doctor advised me to go home and get my affairs in order, which is doctor's code for prepare to die. Later that evening I had a biopsy... it turned out to be a very rare form of pancreatic cancer that is operable with surgery. I had the surgery and I'm fine now.", formattedTime: "10:55" },
-    { start: 675, duration: 18, text: "This was the closest I've been to facing death, and I hope it's the closest I get for a few more decades. Death is the destination we all share. No one has ever escaped it.", formattedTime: "11:15" },
-    { start: 693, duration: 18, text: "And that is as it should be, because Death is very likely the single best invention of Life. It is Life's change agent. It clears out the old to make way for the new.", formattedTime: "11:33" },
-    { start: 711, duration: 18, text: "Your time is limited, so don't waste it living someone else's life. Don't be trapped by dogma — which is living with the results of other people's thinking.", formattedTime: "11:51" },
-    { start: 729, duration: 20, text: "Don't let the noise of others' opinions drown out your own inner voice. And most important, have the courage to follow your heart and intuition. They somehow already know what you truly want to become.", formattedTime: "12:09" },
-    { start: 749, duration: 18, text: "When I was young, there was an amazing publication called The Whole Earth Catalog, which was one of the bibles of my generation. It was created by a fellow named Stewart Brand.", formattedTime: "12:29" },
-    { start: 767, duration: 18, text: "On the back cover of their final issue was a photograph of an early morning country road, beneath which were the words: 'Stay Hungry. Stay Foolish.'", formattedTime: "12:47" },
-    { start: 785, duration: 18, text: "It was their farewell message as they signed off. Stay Hungry. Stay Foolish. And I have always wished that for myself. And now, as you graduate to begin anew, I wish that for you. Stay Hungry. Stay Foolish. Thank you very much.", formattedTime: "13:05" },
-  ],
-  'aircAruvnKk': [
-    { start: 0, duration: 8, text: "This is a 3, it's roughly 28 by 28 pixels, but let's see how a computer might identify it.", formattedTime: "00:00" },
-    { start: 8, duration: 12, text: "When you look at this image, your visual cortex immediately registers that it's composed of loops and strokes.", formattedTime: "00:08" },
-    { start: 20, duration: 15, text: "A traditional computer program would struggle with handcrafted rules to distinguish this 3 from an 8 or a 5.", formattedTime: "00:20" },
-    { start: 35, duration: 15, text: "Instead, with a neural network, we pass each pixel value into an input layer of 784 neurons.", formattedTime: "00:35" },
-    { start: 50, duration: 18, text: "Each neuron holds an activation number between 0 and 1 representing the brightness of that pixel.", formattedTime: "00:50" },
-    { start: 68, duration: 16, text: "These activations feed into hidden layers through weighted connections, plus a bias, passed through an activation function like Sigmoid or ReLU.", formattedTime: "01:08" },
-    { start: 84, duration: 18, text: "In this series, we will unpack how backpropagation and gradient descent adjust millions of weights so the machine learns patterns on its own.", formattedTime: "01:24" },
-  ]
-};
+export const SAMPLE_FALLBACK_TRANSCRIPTS: Record<string, ParsedSegment[]> = {};

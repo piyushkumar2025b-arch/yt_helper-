@@ -771,26 +771,26 @@ export function getCombinedTechAndVideoWords(
     const videoEntry: TechWordEntry = {
       id: `video-term-${vt.term.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
       term: vt.term,
-      fullForm: vt.fullForm || vt.tag || 'Important Concept from Active Video',
+      fullForm: vt.fullForm || vt.tag || undefined,
       domain: 'From This Video',
       importance: vt.importance === 'critical' ? 'essential' : 'high',
       plainMeaning: vt.definition,
       techArchitecture:
-        vt.category === 'acronym'
-          ? `Technical / Domain Abbreviation (${vt.fullForm || vt.term}) highlighted in "${videoTitle || 'this video'}". Click "Deep Multi-Dictionary Lookup" to inspect its full lexical, Wikipedia, Wikidata, and engineering definitions.`
-          : `Key domain concept extracted directly from "${videoTitle || 'this video'}". Click "Deep Multi-Dictionary Lookup" to query Google Dictionary, Wiktionary, Wikipedia, Wikidata, and StackOverflow Technical Wikis.`,
+        vt.whyItMatters ||
+        vt.definition,
       realWorldExample:
+        vt.realWorldExample ||
         vt.contextInVideo ||
         segMatch?.quote ||
-        `Discussed as a core concept in "${videoTitle || 'the active video'}".`,
-      complexityOrMetric: vt.tag || 'Active Video Concept',
+        vt.definition,
+      complexityOrMetric: vt.tag || undefined,
       relatedWords: extractedVideoTerms
         .filter((other) => other.term !== vt.term)
         .slice(0, 5)
         .map((other) => other.term),
       contextInVideo: vt.contextInVideo || segMatch?.quote,
-      timestampSeconds: segMatch?.seconds,
-      formattedTime: segMatch?.label,
+      timestampSeconds: vt.timestampSeconds ?? segMatch?.seconds,
+      formattedTime: vt.formattedTime || segMatch?.label,
     };
     videoMatchedWords.push(videoEntry);
   }

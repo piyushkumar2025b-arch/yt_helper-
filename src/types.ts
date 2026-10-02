@@ -283,6 +283,14 @@ export interface DictionaryKnowledgeResult {
   phonetic?: string;
   audioUrl?: string;
   partOfSpeech?: string;
+  plainEnglish?: {
+    summary: string;
+    whyItMatters: string;
+    realWorldExample?: string;
+    technicalArchitecture?: string;
+    fullForm?: string;
+    domain?: string;
+  };
   definitions: Array<{
     partOfSpeech: string;
     definition: string;
@@ -305,6 +313,21 @@ export interface DictionaryKnowledgeResult {
     url: string;
     source: string;
   };
+  academicPapers?: Array<{
+    title: string;
+    authors: string;
+    year?: string | number;
+    citationCount?: number;
+    url: string;
+    source: string;
+  }>;
+  books?: Array<{
+    title: string;
+    author: string;
+    year?: string | number;
+    url: string;
+  }>;
+  sourcesUsed?: string[];
   synonyms: string[];
   relatedTerms: Array<{ word: string; score?: number; def?: string }>;
   wikidata?: {
@@ -357,9 +380,17 @@ export interface CrucialTermItem {
   fullForm?: string;
   category: 'acronym' | 'core_concept' | 'entity' | 'rule_of_thumb';
   definition: string;
+  whyItMatters?: string;
+  realWorldExample?: string;
   contextInVideo?: string;
+  formattedTime?: string;
+  timestampSeconds?: number;
   importance: 'critical' | 'high' | 'recommended';
   tag?: string;
+  sources?: Array<{
+    label: string;
+    url: string;
+  }>;
 }
 
 export interface KeyTakeawayItem {
@@ -368,7 +399,13 @@ export interface KeyTakeawayItem {
   description: string;
   quote?: string;
   actionableLesson: string;
+  formattedTime?: string;
+  timestampSeconds?: number;
   category: 'mindset' | 'decision_making' | 'execution' | 'craft';
+  sources?: Array<{
+    label: string;
+    url: string;
+  }>;
 }
 
 export type FontFamilyOption = 'sans' | 'serif' | 'humanist' | 'geometric' | 'mono';

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
@@ -14,6 +14,7 @@ import {
 import { ChatMessage, ThemeId } from '../types';
 import { APP_THEMES } from '../constants';
 import { speechService } from '../services/speechService';
+import { recordUserActivity } from '../services/listsService';
 
 interface AskVideoAIProps {
   transcript: string;
@@ -68,6 +69,20 @@ export const AskVideoAI: React.FC<AskVideoAIProps> = ({
 
   const themeConfig = APP_THEMES[currentTheme] || APP_THEMES.midnight;
 
+  useEffect(() => {
+    setMessages([]);
+    setSpeakingIdx(null);
+  }, [videoTitle]);
+
+  useEffect(() => {
+    const unsub = speechService.subscribeStateChange((playing) => {
+      if (!playing) setSpeakingIdx(null);
+    });
+    return () => {
+      unsub();
+    };
+  }, []);
+
   const handleSend = async (qText: string) => {
     const trimmed = qText.trim();
     if (!trimmed || isAsking || !transcript) return;
@@ -78,14 +93,17 @@ export const AskVideoAI: React.FC<AskVideoAIProps> = ({
     setIsAsking(true);
 
     try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (openRouterKey?.trim()) {
+        headers['X-OpenRouter-Key'] = openRouterKey.trim();
+      }
       const res = await fetch('/api/chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
           question: trimmed,
           transcript,
           title: videoTitle,
-          openRouterKey,
           model: selectedModelId,
         }),
       });
@@ -94,7 +112,14 @@ export const AskVideoAI: React.FC<AskVideoAIProps> = ({
         throw new Error(data.error || 'Could not get an answer right now.');
       }
       setMessages((prev) => [...prev, { role: 'assistant', content: data.answer }]);
-    } catch {
+      recordUserActivity({
+        actionType: 'chat',
+        title: `Video Q&A: ${trimmed}`,
+        query: trimmed,
+        details: String(data.answer || '').replace(/[#*_>`]/g, '').slice(0, 260),
+        videoTitle,
+      }).catch(() => {});
+    } catch (err: any) {
       const sentences = transcript
         .replace(/\s+/g, ' ')
         .split(/(?<=[.!?])\s+/)
@@ -109,8 +134,8 @@ export const AskVideoAI: React.FC<AskVideoAIProps> = ({
         qWords.some((w) => s.toLowerCase().includes(w))
       );
       const selected = (matches.length > 0 ? matches : sentences).slice(0, 5);
-      const fallbackReply = `Here is what **"${videoTitle || 'this video'}"** shares about that in plain English:\n\n${selected
-        .map((s, idx) => `- **[0${idx * 2}:15]** ${s}`)
+      const fallbackReply = `*(Note: ${err?.message || 'AI service unavailable'} — showing matching transcript excerpts)*\n\nHere is what **"${videoTitle || 'this video'}"** shares in the transcript:\n\n${selected
+        .map((s) => `- ${s}`)
         .join('\n\n')}`;
       setMessages((prev) => [...prev, { role: 'assistant', content: fallbackReply }]);
     } finally {

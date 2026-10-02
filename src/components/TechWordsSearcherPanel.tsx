@@ -28,6 +28,7 @@ import {
   getCombinedTechAndVideoWords,
   searchTechWordsHighGrade,
 } from '../services/techDictionaryService';
+import { recordUserActivity } from '../services/listsService';
 import { speechService } from '../services/speechService';
 import { SmartImage } from './SmartImage';
 
@@ -80,40 +81,93 @@ export const TechWordsSearcherPanel: React.FC<TechWordsSearcherPanelProps> = ({
     return searchTechWordsHighGrade(searchQuery, allWords, domainFilter);
   }, [searchQuery, allWords, domainFilter]);
 
-  const performDeepDictionaryLookup = async (termToLookup: string, matchedEntry?: TechWordEntry) => {
+  const performDeepDictionaryLookup = async (
+    termToLookup: string,
+    matchedEntry?: TechWordEntry,
+    isUserInitiated: boolean = true
+  ) => {
     const cleanQuery = termToLookup.replace(/\(.*?\)/g, '').trim() || termToLookup.trim();
     if (!cleanQuery) return;
 
-    if (matchedEntry) {
-      setSelectedWord(matchedEntry);
-    } else {
-      const found = allWords.find(
+    const existingEntry =
+      matchedEntry ||
+      allWords.find(
         (w) =>
           w.term.toLowerCase() === cleanQuery.toLowerCase() ||
           w.term.toLowerCase().includes(cleanQuery.toLowerCase())
       );
-      setSelectedWord(
-        found || {
-          id: `custom-lookup-${cleanQuery.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
-          term: cleanQuery,
-          fullForm: 'Live Multi-Dictionary & Technical Lookup',
-          domain: 'Software Engineering',
-          importance: 'high',
-          plainMeaning: `Querying Google Dictionary, Wiktionary Open Dictionary, Wikipedia, Wikidata, and StackOverflow Technical Wikis for "${cleanQuery}"...`,
-          techArchitecture:
-            'Inspect the live multi-dictionary, Wiktionary, StackOverflow Tag Wiki, Wikipedia, and Wikidata sections below for full lexical and engineering details.',
-          realWorldExample: `Searched via High-Grade Tech, AI & CSE Word Searcher.`,
-          relatedWords: [],
-        }
-      );
+
+    if (existingEntry) {
+      setSelectedWord(existingEntry);
+    } else {
+      setSelectedWord({
+        id: `custom-lookup-${cleanQuery.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
+        term: cleanQuery,
+        domain: 'Software Engineering',
+        importance: 'high',
+        plainMeaning: '',
+        techArchitecture: '',
+        realWorldExample: '',
+        relatedWords: [],
+      });
     }
 
     setIsDictLoading(true);
     try {
-      const res = await fetch(`/api/dictionary-knowledge?q=${encodeURIComponent(cleanQuery)}`);
+      const res = await fetch(
+        `/api/dictionary-knowledge?q=${encodeURIComponent(cleanQuery)}&context=${encodeURIComponent(videoTitle)}`
+      );
       const data = await res.json();
       if (res.ok && data.ok && data.result) {
-        setDictResult(data.result);
+        const r: DictionaryKnowledgeResult = data.result;
+        setDictResult(r);
+
+        if (!existingEntry) {
+          const synthesizedMeaning =
+            r.plainEnglish?.summary ||
+            r.definitions?.[0]?.definition ||
+            r.wikipedia?.extract ||
+            r.duckDuckGoAbstract?.abstract ||
+            r.wikidata?.description ||
+            '';
+          const synthesizedArch =
+            r.plainEnglish?.technicalArchitecture ||
+            r.technicalWiki?.excerpt ||
+            r.plainEnglish?.whyItMatters ||
+            (r.wikipedia?.extract ? r.wikipedia.extract.split(/(?<=[.!?])\s+/).slice(1, 3).join(' ') : '') ||
+            '';
+          const synthesizedExample =
+            r.plainEnglish?.realWorldExample ||
+            r.definitions?.find((d) => d.example)?.example ||
+            '';
+
+          setSelectedWord({
+            id: `custom-lookup-${cleanQuery.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
+            term: r.wikipedia?.title || cleanQuery,
+            fullForm: r.plainEnglish?.fullForm || r.wikidata?.description || undefined,
+            domain: (r.plainEnglish?.domain as any) || 'Software Engineering',
+            importance: 'high',
+            plainMeaning: synthesizedMeaning,
+            techArchitecture: synthesizedArch,
+            realWorldExample: synthesizedExample,
+            relatedWords: (r.relatedTerms || []).slice(0, 6).map((rt) => rt.word),
+          });
+        }
+
+        if (isUserInitiated) {
+          recordUserActivity({
+            actionType: 'techword',
+            title: `Tech & Dictionary Lookup: ${cleanQuery}`,
+            query: cleanQuery,
+            details:
+              r.plainEnglish?.summary ||
+              existingEntry?.plainMeaning ||
+              r.definitions?.[0]?.definition ||
+              r.wikidata?.description ||
+              '',
+            videoTitle,
+          }).catch(() => {});
+        }
       } else {
         setDictResult(null);
       }
@@ -127,11 +181,11 @@ export const TechWordsSearcherPanel: React.FC<TechWordsSearcherPanelProps> = ({
   useEffect(() => {
     if (initialSearchQuery.trim()) {
       setSearchQuery(initialSearchQuery);
-      performDeepDictionaryLookup(initialSearchQuery);
+      performDeepDictionaryLookup(initialSearchQuery, undefined, true);
     } else if (!selectedWord && allWords.length > 0) {
       const first = videoMatchedWords[0] || allWords[0];
       setSelectedWord(first);
-      performDeepDictionaryLookup(first.term, first);
+      performDeepDictionaryLookup(first.term, first, false);
     }
   }, [initialSearchQuery]);
 
@@ -552,35 +606,43 @@ export const TechWordsSearcherPanel: React.FC<TechWordsSearcherPanelProps> = ({
 
               {/* 1. Plain-English Meaning & Technological / CSE Architecture Breakdown */}
               <div className="space-y-3.5">
-                <div className="space-y-1">
-                  <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-emerald-400">
-                    <BookOpen className="w-3.5 h-3.5" />
-                    <span>Plain-English Meaning</span>
+                {(selectedWord.plainMeaning || dictResult?.plainEnglish?.summary) && (
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-emerald-400">
+                      <BookOpen className="w-3.5 h-3.5" />
+                      <span>Plain-English Meaning</span>
+                    </div>
+                    <p className={`text-sm leading-relaxed ${themeConfig.textPrimary}`}>
+                      {selectedWord.plainMeaning || dictResult?.plainEnglish?.summary}
+                    </p>
                   </div>
-                  <p className={`text-sm leading-relaxed ${themeConfig.textPrimary}`}>
-                    {selectedWord.plainMeaning}
-                  </p>
-                </div>
+                )}
 
-                <div className="space-y-1 pt-2 border-t border-slate-500/15">
-                  <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-indigo-400">
-                    <Cpu className="w-3.5 h-3.5" />
-                    <span>Technological, AI &amp; CSE Architecture (How It Works Under the Hood)</span>
+                {(selectedWord.techArchitecture || dictResult?.plainEnglish?.technicalArchitecture || dictResult?.plainEnglish?.whyItMatters) && (
+                  <div className="space-y-1 pt-2 border-t border-slate-500/15">
+                    <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-indigo-400">
+                      <Cpu className="w-3.5 h-3.5" />
+                      <span>How It Works &amp; Why It Matters</span>
+                    </div>
+                    <p className={`text-xs sm:text-sm leading-relaxed ${themeConfig.textSecondary}`}>
+                      {selectedWord.techArchitecture ||
+                        dictResult?.plainEnglish?.technicalArchitecture ||
+                        dictResult?.plainEnglish?.whyItMatters}
+                    </p>
                   </div>
-                  <p className={`text-xs sm:text-sm leading-relaxed ${themeConfig.textSecondary}`}>
-                    {selectedWord.techArchitecture}
-                  </p>
-                </div>
+                )}
 
-                <div className="space-y-1 pt-2 border-t border-slate-500/15">
-                  <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-amber-400">
-                    <Code2 className="w-3.5 h-3.5" />
-                    <span>Real-World Engineering &amp; Production Example</span>
+                {(selectedWord.realWorldExample || dictResult?.plainEnglish?.realWorldExample) && (
+                  <div className="space-y-1 pt-2 border-t border-slate-500/15">
+                    <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-amber-400">
+                      <Code2 className="w-3.5 h-3.5" />
+                      <span>Real-World Example</span>
+                    </div>
+                    <p className={`text-xs sm:text-sm leading-relaxed ${themeConfig.textSecondary}`}>
+                      {selectedWord.realWorldExample || dictResult?.plainEnglish?.realWorldExample}
+                    </p>
                   </div>
-                  <p className={`text-xs sm:text-sm leading-relaxed ${themeConfig.textSecondary}`}>
-                    {selectedWord.realWorldExample}
-                  </p>
-                </div>
+                )}
 
                 {selectedWord.contextInVideo && (
                   <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/25 space-y-1">
@@ -768,6 +830,86 @@ export const TechWordsSearcherPanel: React.FC<TechWordsSearcherPanelProps> = ({
                       <span>Wikidata Graph</span>
                       <ExternalLink className="w-2.5 h-2.5" />
                     </a>
+                  </div>
+                )}
+
+                {/* Peer-Reviewed Academic Papers (OpenAlex, arXiv, Crossref) */}
+                {dictResult?.academicPapers && dictResult.academicPapers.length > 0 && (
+                  <div className="space-y-2 pt-2 border-t border-slate-500/15">
+                    <span className={`text-[11px] font-bold uppercase tracking-wider ${themeConfig.textMuted}`}>
+                      Peer-Reviewed Papers &amp; Preprints (OpenAlex · arXiv · Crossref)
+                    </span>
+                    <div className="space-y-1.5">
+                      {dictResult.academicPapers.map((paper, idx) => (
+                        <a
+                          key={idx}
+                          href={paper.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="block p-2.5 rounded-lg bg-slate-500/5 hover:bg-slate-500/10 transition-colors space-y-0.5"
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <span className={`text-xs font-semibold ${themeConfig.textPrimary} hover:underline`}>
+                              {paper.title}
+                            </span>
+                            <ExternalLink className="w-3 h-3 shrink-0 opacity-60 mt-0.5" />
+                          </div>
+                          <div className={`text-[11px] ${themeConfig.textMuted} flex items-center gap-2 flex-wrap`}>
+                            <span>{paper.authors}</span>
+                            {paper.year && <span>· {paper.year}</span>}
+                            {paper.citationCount !== undefined && <span>· {paper.citationCount} citations</span>}
+                            <span className="text-indigo-400 font-medium">· {paper.source}</span>
+                          </div>
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Published Books (OpenLibrary) */}
+                {dictResult?.books && dictResult.books.length > 0 && (
+                  <div className="space-y-2 pt-2 border-t border-slate-500/15">
+                    <span className={`text-[11px] font-bold uppercase tracking-wider ${themeConfig.textMuted}`}>
+                      Published Books &amp; Literature (OpenLibrary)
+                    </span>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {dictResult.books.map((bk, idx) => (
+                        <a
+                          key={idx}
+                          href={bk.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="p-2.5 rounded-lg bg-slate-500/5 hover:bg-slate-500/10 transition-colors space-y-0.5"
+                        >
+                          <div className="flex items-start justify-between gap-1.5">
+                            <span className={`text-xs font-semibold ${themeConfig.textPrimary} line-clamp-1`}>
+                              {bk.title}
+                            </span>
+                            <ExternalLink className="w-2.5 h-2.5 shrink-0 opacity-60 mt-0.5" />
+                          </div>
+                          <div className={`text-[11px] ${themeConfig.textMuted}`}>
+                            {bk.author} {bk.year ? `(${bk.year})` : ''}
+                          </div>
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Active Knowledge Sources Verified Badges */}
+                {dictResult?.sourcesUsed && dictResult.sourcesUsed.length > 0 && (
+                  <div className="flex items-center gap-1.5 flex-wrap pt-2 border-t border-slate-500/15 text-[10px]">
+                    <span className={`${themeConfig.textMuted} font-semibold uppercase tracking-wider`}>
+                      Verified Knowledge Sources ({dictResult.sourcesUsed.length}):
+                    </span>
+                    {dictResult.sourcesUsed.map((src) => (
+                      <span
+                        key={src}
+                        className="px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 font-medium"
+                      >
+                        ✓ {src}
+                      </span>
+                    ))}
                   </div>
                 )}
 

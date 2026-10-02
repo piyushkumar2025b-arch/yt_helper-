@@ -50,6 +50,7 @@ import {
   createCustomExactResource,
   deleteCustomExactResource,
   loadLocalCustomResources,
+  recordUserActivity,
 } from '../services/listsService';
 import { SmartImage } from './SmartImage';
 
@@ -246,6 +247,15 @@ export const ResearchVisualsPanel: React.FC<ResearchVisualsPanelProps> = ({
 
   const loadMoreSentinelRef = useRef<HTMLDivElement | null>(null);
   const isFetchingRef = useRef<boolean>(false);
+  const searchAbortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (searchAbortRef.current) {
+        searchAbortRef.current.abort();
+      }
+    };
+  }, []);
 
   const smartTerms = React.useMemo(() => {
     return extractSmartTermsFromSummary(summaryMarkdown, videoTitle);
@@ -254,17 +264,23 @@ export const ResearchVisualsPanel: React.FC<ResearchVisualsPanelProps> = ({
   useEffect(() => {
     if (initialQuery) {
       setSearchQuery(initialQuery);
-      performSearch(initialQuery);
+      performSearch(initialQuery, true);
     } else if (smartTerms.length > 0 && !searchQuery) {
       const initialTerm = smartTerms[0];
       setSearchQuery(initialTerm);
-      performSearch(initialTerm);
+      performSearch(initialTerm, false);
     }
   }, [smartTerms.length, initialQuery]);
 
-  const performSearch = async (termToSearch: string) => {
+  const performSearch = async (termToSearch: string, isUserInitiated: boolean = true) => {
     const q = termToSearch.trim();
     if (!q) return;
+
+    if (searchAbortRef.current) {
+      searchAbortRef.current.abort();
+    }
+    const controller = new AbortController();
+    searchAbortRef.current = controller;
 
     setIsLoading(true);
     isFetchingRef.current = true;
@@ -278,7 +294,7 @@ export const ResearchVisualsPanel: React.FC<ResearchVisualsPanelProps> = ({
     try {
       const safeFetchJson = async (url: string) => {
         try {
-          const r = await fetch(url);
+          const r = await fetch(url, { signal: controller.signal });
           if (!r.ok) return { ok: false, data: {} };
           const d = await r.json().catch(() => ({}));
           return { ok: true, data: d };
@@ -300,6 +316,8 @@ export const ResearchVisualsPanel: React.FC<ResearchVisualsPanelProps> = ({
           safeFetchJson(`/api/youtube-search?q=${encodeURIComponent(q)}&page=0`),
         ]);
 
+      if (controller.signal.aborted) return;
+
       setAcademicResults(acadRes.ok && Array.isArray(acadRes.data.papers) ? acadRes.data.papers : []);
       setCodeResults(codeRes.ok && Array.isArray(codeRes.data.repos) ? codeRes.data.repos : []);
       setDiscussionResults(
@@ -312,11 +330,29 @@ export const ResearchVisualsPanel: React.FC<ResearchVisualsPanelProps> = ({
       setBookResults(booksRes.ok && Array.isArray(booksRes.data.books) ? booksRes.data.books : []);
       setYtResults(ytRes.ok && Array.isArray(ytRes.data.videos) ? ytRes.data.videos : []);
       setYtNextPageToken(ytRes.data.nextPageToken || null);
+
+      if (isUserInitiated) {
+        const totalFound =
+          (acadRes.data?.papers?.length || 0) +
+          (webRes.data?.results?.length || 0) +
+          (booksRes.data?.books?.length || 0) +
+          (newsRes.data?.news?.length || 0);
+        recordUserActivity({
+          actionType: 'search',
+          title: `Multi-Source Research Search: ${q}`,
+          query: q,
+          details: `Searched 55+ academic, web, book, code & news sources for "${q}" (${totalFound}+ primary results).`,
+          videoId: videoMetadata?.videoId || '',
+          videoTitle,
+        }).catch(() => {});
+      }
     } catch {
       // handled per-request
     } finally {
-      setIsLoading(false);
-      isFetchingRef.current = false;
+      if (searchAbortRef.current === controller) {
+        setIsLoading(false);
+        isFetchingRef.current = false;
+      }
     }
   };
 

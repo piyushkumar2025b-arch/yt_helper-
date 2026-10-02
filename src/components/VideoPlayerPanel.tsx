@@ -64,6 +64,7 @@ export const VideoPlayerPanel: React.FC<VideoPlayerPanelProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const isPlayerReadyRef = useRef<boolean>(false);
   const lastReportedSecRef = useRef<number>(-1);
+  const lastHandledSeekTriggerRef = useRef<number>(seekTrigger);
   const themeConfig = APP_THEMES[currentTheme] || APP_THEMES.midnight;
 
   // Custom width when user drags the resize handle or picks a size preset
@@ -99,10 +100,25 @@ export const VideoPlayerPanel: React.FC<VideoPlayerPanelProps> = ({
     lastReportedSecRef.current = -1;
   }, [metadata?.videoId]);
 
-  // Listen to YouTube IFrame API postMessage events for live playback time synchronization
+  // Listen to YouTube IFrame API postMessage events for live playback time synchronization (M-11)
   useEffect(() => {
+    const ALLOWED_YT_HOSTS = new Set([
+      'www.youtube.com',
+      'youtube.com',
+      'www.youtube-nocookie.com',
+      'youtube-nocookie.com',
+    ]);
+
     const handleMessage = (event: MessageEvent) => {
-      if (!event.origin.includes('youtube.com')) return;
+      try {
+        const originHost = new URL(event.origin).hostname.toLowerCase();
+        if (!ALLOWED_YT_HOSTS.has(originHost)) return;
+      } catch {
+        return;
+      }
+      if (iframeRef.current?.contentWindow && event.source !== iframeRef.current.contentWindow) {
+        return;
+      }
       try {
         const data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
         if (!data) return;
@@ -130,19 +146,22 @@ export const VideoPlayerPanel: React.FC<VideoPlayerPanelProps> = ({
     try {
       iframeRef.current.contentWindow.postMessage(
         JSON.stringify({ event: 'listening', id: 'opentranscript-yt' }),
-        '*'
+        'https://www.youtube.com'
       );
       iframeRef.current.contentWindow.postMessage(
         JSON.stringify({ event: 'command', func: 'addEventListener', args: ['onStateChange'] }),
-        '*'
+        'https://www.youtube.com'
       );
     } catch {
       // ignore
     }
   };
 
-  // Seek YouTube iframe when user explicitly clicks a timestamp (seekTrigger increments)
+  // Seek YouTube iframe only when seekTrigger explicitly increments (M-12)
   useEffect(() => {
+    if (seekTrigger === lastHandledSeekTriggerRef.current) return;
+    lastHandledSeekTriggerRef.current = seekTrigger;
+
     if (seekTrigger > 0 && activeTimestamp !== null && iframeRef.current && metadata?.videoId) {
       const sec = Math.max(0, Math.floor(activeTimestamp));
       lastReportedSecRef.current = sec;
@@ -150,11 +169,11 @@ export const VideoPlayerPanel: React.FC<VideoPlayerPanelProps> = ({
         try {
           iframeRef.current.contentWindow.postMessage(
             JSON.stringify({ event: 'command', func: 'seekTo', args: [sec, true] }),
-            '*'
+            'https://www.youtube.com'
           );
           iframeRef.current.contentWindow.postMessage(
             JSON.stringify({ event: 'command', func: 'playVideo', args: [] }),
-            '*'
+            'https://www.youtube.com'
           );
           return;
         } catch {
@@ -163,7 +182,7 @@ export const VideoPlayerPanel: React.FC<VideoPlayerPanelProps> = ({
       }
       iframeRef.current.src = `https://www.youtube.com/embed/${metadata.videoId}?enablejsapi=1&autoplay=1&start=${sec}&rel=0`;
     }
-  }, [seekTrigger, metadata?.videoId]);
+  }, [seekTrigger, activeTimestamp, metadata?.videoId]);
 
   const snapToCorner = (targetCorner: FloatingCorner, widthToUse = customWidth) => {
     if (typeof window === 'undefined') return;

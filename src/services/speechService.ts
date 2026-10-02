@@ -233,7 +233,7 @@ export const STUDIO_CLOUD_VOICES: VoiceOption[] = [
 
 export function tokenizeSpeechWords(text: string): string[] {
   return text
-    .replace(/([a-zA-Z0-9)'"%])([—–])([a-zA-Z0-9('"$$])/g, '$1$2 $3')
+    .replace(/([a-zA-Z0-9)'"%\]])([—–→])([a-zA-Z0-9('"$[\]])/g, '$1$2 $3')
     .replace(/\s+/g, ' ')
     .trim()
     .split(' ')
@@ -310,28 +310,33 @@ function getWordPhoneticProfile(rawWord: string): {
 }
 
 function normTokenForSync(s: string): string {
-  return s.replace(/[^a-zA-Z0-9&%$+]/g, '').toLowerCase();
+  const cleaned = s
+    .replace(/&/g, 'and')
+    .replace(/\+/g, 'plus')
+    .replace(/[^a-zA-Z0-9%$]/g, '')
+    .toLowerCase();
+  return cleaned.replace(/^\$+/, '') || cleaned;
 }
 
 /**
  * Aligns UI tokens (`uiWords`) with hardware `WordBoundary` events emitted by the neural TTS engine.
- * Uses a two-stage Global Anchor + Local Phonetic Interpolation algorithm so any multi-word phrase,
+ * Uses a two-stage Global Anchor + Local Phonetic-Weighted Interpolation algorithm so any multi-word phrase,
  * number, symbol, or compound token is strictly bounded by surrounding exact word anchors and can
- * never cause cumulative drift.
+ * never cause cumulative drift or lag behind spoken audio.
  */
-function alignUiWordsToNeuralBoundaries(
+export function alignUiWordsToNeuralBoundaries(
   uiWords: string[],
   rawBoundaries: Array<{ text: string; startSec: number; endSec: number }>
 ): WordTiming[] {
   if (uiWords.length === 0) return [];
 
-  // 1. Expand multi-word or dash/slash-connected boundary items into individual sub-tokens weighted by phonetic length
+  // 1. Expand multi-word or dash/slash/hyphen-connected boundary items into sub-tokens weighted by phonetic length
   const expandedSubs: Array<{ startSec: number; endSec: number; text: string; norm: string }> = [];
   for (const b of rawBoundaries) {
     const startSec = Math.max(0, Number(b.startSec) || 0);
     const endSec = Math.max(startSec + 0.01, Number(b.endSec) || startSec + 0.07);
     const rawStr = String(b.text || '')
-      .replace(/([a-zA-Z0-9])([—–/→])([a-zA-Z0-9])/g, '$1 $3')
+      .replace(/([a-zA-Z0-9])([—–/→×])([a-zA-Z0-9])/g, '$1 $3')
       .trim();
     const parts = rawStr.split(/\s+/).filter(Boolean);
 
@@ -357,7 +362,7 @@ function alignUiWordsToNeuralBoundaries(
 
   if (expandedSubs.length === 0) return [];
 
-  // 2. Discover monotonically increasing anchor pairs (uiIndex -> [subStartIdx, subEndIdx])
+  // 2. Discover monotonically increasing anchor pairs (uiIndex -> [startSec, endSec])
   const anchors: Array<{ uiIdx: number; startSec: number; endSec: number }> = [];
   let subPtr = 0;
 
@@ -376,14 +381,14 @@ function alignUiWordsToNeuralBoundaries(
       continue;
     }
 
-    // Case B: UI token is a compound of 2..4 consecutive expandedSubs tokens (e.g. "AI/ML" -> "ai" + "ml")
+    // Case B: UI token is a compound of 2..6 consecutive expandedSubs tokens (e.g. "drop-in", "784→16→16→10", "AI/ML")
     if (uNorm.startsWith(expandedSubs[subPtr].norm)) {
       let concat = '';
       const startS = expandedSubs[subPtr].startSec;
       let endS = expandedSubs[subPtr].endSec;
       let k = subPtr;
       let matchedCompound = false;
-      while (k < expandedSubs.length && k - subPtr < 5 && (concat + expandedSubs[k].norm).length <= uNorm.length + 2) {
+      while (k < expandedSubs.length && k - subPtr < 7 && (concat + expandedSubs[k].norm).length <= uNorm.length + 2) {
         concat += expandedSubs[k].norm;
         endS = expandedSubs[k].endSec;
         k++;
@@ -399,16 +404,22 @@ function alignUiWordsToNeuralBoundaries(
       }
     }
 
-    // Case C: Lookahead in expandedSubs (1..6) and uiWords (0..3) for the nearest exact synchronization anchor
+    // Case C: Lookahead in expandedSubs (0..10) and uiWords (0..5) for the nearest exact synchronization anchor
     let bestSubLook = -1;
     let bestUiLook = -1;
     let bestDist = 999;
 
-    for (let uLook = 0; uLook <= 3 && i + uLook < uiWords.length; uLook++) {
+    for (let uLook = 0; uLook <= 5 && i + uLook < uiWords.length; uLook++) {
       const candidateUNorm = normTokenForSync(uiWords[i + uLook]);
       if (!candidateUNorm) continue;
-      for (let sLook = 0; sLook <= 6 && subPtr + sLook < expandedSubs.length; sLook++) {
-        if (expandedSubs[subPtr + sLook].norm === candidateUNorm) {
+      for (let sLook = 0; sLook <= 10 && subPtr + sLook < expandedSubs.length; sLook++) {
+        const subNorm = expandedSubs[subPtr + sLook].norm;
+        if (
+          subNorm === candidateUNorm ||
+          (candidateUNorm.length >= 3 &&
+            sLook + 1 < expandedSubs.length &&
+            subNorm + expandedSubs[subPtr + sLook + 1].norm === candidateUNorm)
+        ) {
           const dist = uLook + sLook;
           if (dist < bestDist) {
             bestDist = dist;
@@ -422,17 +433,29 @@ function alignUiWordsToNeuralBoundaries(
     }
 
     if (bestSubLook !== -1 && bestUiLook === 0) {
+      // Current UI word matches expandedSubs[subPtr + bestSubLook]; span from subPtr so spoken pre-words are included
       const targetSub = subPtr + bestSubLook;
       anchors.push({
         uiIdx: i,
-        startSec: expandedSubs[targetSub].startSec,
+        startSec: expandedSubs[subPtr].startSec,
         endSec: expandedSubs[targetSub].endSec,
       });
       subPtr = targetSub + 1;
     } else if (bestSubLook === 0 && bestUiLook > 0) {
       // Current subPtr matches a future UI word (i + bestUiLook); leave UI word i unanchored so it interpolates cleanly
       continue;
-    } else if (bestSubLook === -1) {
+    } else if (bestSubLook > 0 && bestUiLook > 0) {
+      // Future UI word (i + bestUiLook) matches future sub (subPtr + bestSubLook).
+      // Advance subPtr proportionally across the skipped sub-tokens so subPtr never lags behind!
+      const consumeCount = Math.max(1, Math.floor(bestSubLook / bestUiLook));
+      const endSubIdx = Math.min(expandedSubs.length - 1, subPtr + consumeCount - 1);
+      anchors.push({
+        uiIdx: i,
+        startSec: expandedSubs[subPtr].startSec,
+        endSec: expandedSubs[endSubIdx].endSec,
+      });
+      subPtr = endSubIdx + 1;
+    } else {
       // Neither matched nearby; pair 1-to-1 so pointer advances steadily
       anchors.push({
         uiIdx: i,
@@ -443,7 +466,7 @@ function alignUiWordsToNeuralBoundaries(
     }
   }
 
-  // 3. Build complete WordTiming[] for all uiWords, interpolating any unanchored tokens between anchors
+  // 3. Build complete WordTiming[] for all uiWords, interpolating any unanchored tokens by phonetic weight
   const result: WordTiming[] = new Array(uiWords.length);
   for (const a of anchors) {
     result[a.uiIdx] = {
@@ -466,22 +489,38 @@ function alignUiWordsToNeuralBoundaries(
       idx++;
     }
     const gapEndIdx = idx - 1; // inclusive
-    const prevStartSec = gapStartIdx > 0 && result[gapStartIdx - 1] ? result[gapStartIdx - 1].endSec : expandedSubs[0].startSec;
+    const prevStartSec =
+      gapStartIdx > 0 && result[gapStartIdx - 1]
+        ? result[gapStartIdx - 1].endSec
+        : expandedSubs[0].startSec;
     const nextEndSec =
       idx < uiWords.length && result[idx]
         ? Math.max(prevStartSec + 0.02, result[idx].startSec)
         : Math.max(prevStartSec + 0.06 * (gapEndIdx - gapStartIdx + 1), totalEndSec);
 
     const count = gapEndIdx - gapStartIdx + 1;
-    const step = (nextEndSec - prevStartSec) / count;
+    const gapWeights: number[] = [];
+    let totalGapWeight = 0;
+    for (let k = 0; k < count; k++) {
+      const p = getWordPhoneticProfile(uiWords[gapStartIdx + k]);
+      const w = Math.max(0.4, p.spokenWeight + p.pauseWeight * 0.2);
+      gapWeights.push(w);
+      totalGapWeight += w;
+    }
+    if (totalGapWeight <= 0) totalGapWeight = count;
+
+    const spanSec = nextEndSec - prevStartSec;
+    let runningSec = prevStartSec;
     for (let k = 0; k < count; k++) {
       const wIdx = gapStartIdx + k;
+      const wordDur = spanSec * (gapWeights[k] / totalGapWeight);
       result[wIdx] = {
         word: uiWords[wIdx],
         wordIndex: wIdx,
-        startSec: prevStartSec + k * step,
-        endSec: prevStartSec + (k + 1) * step,
+        startSec: runningSec,
+        endSec: runningSec + wordDur,
       };
+      runningSec += wordDur;
     }
   }
 
@@ -927,6 +966,17 @@ class SpeechService {
     }
   }
 
+  private revokePreparedPromise(p?: Promise<PreparedCloudAudio | null>) {
+    if (!p) return;
+    p.then((res) => {
+      if (res?.audioBlobUrl && typeof URL !== 'undefined' && typeof URL.revokeObjectURL === 'function') {
+        try {
+          URL.revokeObjectURL(res.audioBlobUrl);
+        } catch {}
+      }
+    }).catch(() => {});
+  }
+
   /**
    * Maps any selected voice (including legacy/system voices) to its Studio Cloud voice identifier
    * so /api/tts can synthesize it with exact hardware WordBoundary timestamps.
@@ -934,18 +984,17 @@ class SpeechService {
   private resolveCloudVoiceURI(voice: VoiceOption): string {
     if (voice.isStudioCloud) return voice.voiceURI;
     const lower = `${voice.name} ${voice.voiceURI} ${voice.lang}`.toLowerCase();
-    if (lower.includes('gb') || lower.includes('uk') || lower.includes('british') || lower.includes('daniel')) {
-      return lower.includes('male') || lower.includes('daniel') || lower.includes('arthur')
-        ? 'studio:gemini:Charon'
-        : 'studio:gcloud:en-GB-Neural2-A';
+    const isMale = /\b(male|daniel|arthur|david|mark|alex|liam|aarav|steffan|marcus|guy|christopher|ryan)\b/i.test(lower);
+    if (/\b(en-gb|gb|uk|british|daniel|arthur|libby|sonia|eleanor)\b/i.test(lower)) {
+      return isMale ? 'studio:gemini:Charon' : 'studio:gcloud:en-GB-Neural2-A';
     }
-    if (lower.includes('au') || lower.includes('australian') || lower.includes('karen')) {
-      return 'studio:gcloud:en-AU-Natasha';
+    if (/\b(en-au|au|australian|karen|natasha|liam)\b/i.test(lower)) {
+      return isMale ? 'studio:gcloud:en-AU-Neural2-B' : 'studio:gcloud:en-AU-Natasha';
     }
-    if (lower.includes('in') || lower.includes('indian') || lower.includes('rishi')) {
-      return 'studio:gcloud:en-IN-Neural2-A';
+    if (/\b(en-in|hi-in|indian|india|rishi|aarav|ananya|neerja)\b/i.test(lower)) {
+      return isMale ? 'studio:gcloud:en-IN-Neural2-D' : 'studio:gcloud:en-IN-Neural2-A';
     }
-    if (lower.includes('male') || lower.includes('david') || lower.includes('mark') || lower.includes('alex')) {
+    if (isMale) {
       return 'studio:gemini:Puck';
     }
     return 'studio:gemini:Kore';
@@ -973,9 +1022,15 @@ class SpeechService {
             speakingRate: 1.0,
           }),
         });
-        if (!res.ok) return null;
+        if (!res.ok) {
+          this.preparedAudioCache.delete(cacheKey);
+          return null;
+        }
         const data = await res.json();
-        if (!data?.ok || !data?.audioBase64) return null;
+        if (!data?.ok || !data?.audioBase64) {
+          this.preparedAudioCache.delete(cacheKey);
+          return null;
+        }
 
         const words = tokenizeSpeechWords(text);
         const rawArrBuf = base64ToArrayBuffer(data.audioBase64);
@@ -1071,12 +1126,17 @@ class SpeechService {
       } catch {
         // fallback handled by caller
       }
+      this.preparedAudioCache.delete(cacheKey);
       return null;
     })();
 
-    if (this.preparedAudioCache.size > 45) {
+    if (this.preparedAudioCache.size > 40) {
       const oldestKey = this.preparedAudioCache.keys().next().value;
-      if (oldestKey) this.preparedAudioCache.delete(oldestKey);
+      if (oldestKey) {
+        const oldPromise = this.preparedAudioCache.get(oldestKey);
+        this.preparedAudioCache.delete(oldestKey);
+        this.revokePreparedPromise(oldPromise);
+      }
     }
     this.preparedAudioCache.set(cacheKey, promise);
     return promise;
@@ -1176,13 +1236,13 @@ class SpeechService {
           }
 
           const rate = this.currentAudio.playbackRate || 1.0;
-          // Interpolate between audio clock ticks at 60fps
+          // Interpolate smoothly between audio clock ticks at 60fps
           const subFrameDelta =
             rawMediaTime > 0
-              ? Math.min(0.025, ((now - lastPerfTime) / 1000) * rate)
+              ? Math.min(0.065 * rate, ((now - lastPerfTime) / 1000) * rate)
               : 0;
-          // 85ms phoneme-onset & React render lead compensation so the blue highlight lands at the exact spoken syllable onset
-          const leadCompSec = 0.085 * rate;
+          // 115ms phoneme-onset & React render lead compensation so the blue highlight lands at the exact spoken syllable onset
+          const leadCompSec = 0.115 * rate;
           const lookupSec = rawMediaTime > 0 ? rawMediaTime + subFrameDelta + leadCompSec : 0;
 
           const timings = this.currentWordTimings;
@@ -1306,8 +1366,8 @@ class SpeechService {
     }
     if (totalWeight <= 0) totalWeight = 1;
 
-    // Calibrated to ~205 WPM (6.85 phonetic weight units/sec at 1.0x), dynamically refined if onboundary fires
-    let estimatedDurationSec = Math.max(0.45, totalWeight / (6.85 * this.rate));
+    // Calibrated to ~230 WPM (7.85 phonetic weight units/sec at 1.0x), dynamically refined if onboundary fires
+    let estimatedDurationSec = Math.max(0.4, totalWeight / (7.85 * this.rate));
     let synthStartPerf = performance.now();
     let pausedAccumMs = 0;
     let lastPauseStart = 0;
