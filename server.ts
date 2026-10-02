@@ -23,6 +23,13 @@ import {
   YouTubeVideoListResponse,
   ServerAIProvider,
 } from './src/server/types.ts';
+import {
+  createTranscriptIndex,
+  retrieveRelevantChunks,
+  formatRetrievedContextForPrompt,
+  buildGroundedExtractiveAnswer,
+  buildGroundedDeepDive,
+} from './src/server/ragEngine.ts';
 
 dotenv.config();
 
@@ -1357,11 +1364,18 @@ If the last sentence above is unfinished, complete it immediately and then conti
         return;
       }
 
+      // RAG Retrieval: Hierarchical chunking & BM25/TF-IDF retrieval for topic-relevant passages
+      const transcriptIndex = createTranscriptIndex(transcript, segments);
+      const retrievedPassages = retrieveRelevantChunks(transcriptIndex, topic, 7, 2);
+      const groundedContextBlock = formatRetrievedContextForPrompt(retrievedPassages);
+
       const prompt = `You are a thoughtful, clear human guide. The user wants a deeper, more detailed explanation of "${topic}" from the video "${title || 'Video'}".
-Read through the transcript carefully and explain every nuance, story, example, quote, and practical lesson about "${topic}" in natural, engaging everyday English. Include helpful [MM:SS] timestamps where the speaker talks about it.
+Read through the transcript and the exact grounded audio passages below, and explain every nuance, story, example, quote, and practical lesson about "${topic}" in natural, engaging everyday English. Always include helpful [MM:SS] timestamps where the speaker discusses it.
+
+${groundedContextBlock}
 
 TRANSCRIPT:
-${transcript.slice(0, 150000)}
+${transcript.slice(0, 120000)}
 `;
 
       let openRouterWarning = '';
@@ -1427,19 +1441,20 @@ ${transcript.slice(0, 150000)}
 
       res.json({
         ok: true,
-        expansion: buildHumanDeepDive(topic, transcript, title || 'Video', segments),
+        expansion: buildGroundedDeepDive(topic, title || 'Video', retrievedPassages),
         providerUsed: 'local-extractive',
         modelUsed: 'extractive-fallback',
         warning: openRouterWarning || undefined,
       });
     } catch (e: any) {
+      const fallbackIndex = createTranscriptIndex(req.body?.transcript || '', req.body?.segments);
+      const fallbackPassages = retrieveRelevantChunks(fallbackIndex, req.body?.topic || 'Topic', 6, 2);
       res.json({
         ok: true,
-        expansion: buildHumanDeepDive(
+        expansion: buildGroundedDeepDive(
           req.body?.topic || 'Topic',
-          req.body?.transcript || '',
           req.body?.title || 'Video',
-          req.body?.segments
+          fallbackPassages
         ),
         providerUsed: 'local-extractive',
         modelUsed: 'extractive-fallback',
@@ -1468,14 +1483,22 @@ ${transcript.slice(0, 150000)}
 
       let chatWarning = '';
 
+      // RAG Retrieval: Hierarchical chunking & BM25/TF-IDF retrieval for question-relevant passages
+      const transcriptIndex = createTranscriptIndex(transcript, segments);
+      const retrievedPassages = retrieveRelevantChunks(transcriptIndex, question, 6, 2);
+      const groundedContextBlock = formatRetrievedContextForPrompt(retrievedPassages);
+
       const prompt = `You are a friendly, helpful person who just watched the YouTube video "${title || 'Video'}" and knows it inside out.
-Answer the user's question clearly, warmly, and naturally in plain everyday English based on the transcript below. Avoid stiff AI clichés or robotic jargon. If timestamps are available, mention the [MM:SS] timestamps naturally so they can jump to that moment.
+Answer the user's question clearly, warmly, and naturally in plain everyday English based on the video transcript and the exact grounded passages below.
+Avoid stiff clichés or robotic jargon. Always cite the exact verified [MM:SS] timestamps where these points are discussed.
+
+${groundedContextBlock}
 
 USER QUESTION:
 ${question}
 
-TRANSCRIPT:
-${transcript.slice(0, 150000)}
+VIDEO FULL TRANSCRIPT CONTEXT:
+${transcript.slice(0, 120000)}
 `;
 
       if (provider === 'openrouter') {
@@ -1532,7 +1555,7 @@ ${transcript.slice(0, 150000)}
       } catch {}
 
       res.json({
-        answer: buildHumanChatAnswer(question, transcript, title || 'Video', videoId, segments),
+        answer: buildGroundedExtractiveAnswer(question, title || 'Video', retrievedPassages),
         providerUsed: 'local-extractive',
         modelUsed: 'extractive-fallback',
         warning: chatWarning || undefined,
