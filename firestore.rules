@@ -135,7 +135,8 @@ service cloud.firestore {
           && isParentListOwner(listId);
 
         allow list: if isSignedIn()
-          && existing().ownerId == request.auth.uid;
+          && existing().ownerId == request.auth.uid
+          && isParentListOwner(listId);
 
         allow create: if isVerifiedUser()
           && isValidId(listId)

@@ -250,16 +250,17 @@ function sanitizeCustomResourcePayload(
   }
 ) {
   const safeTitle = (input.title || 'Exact Resource').trim().slice(0, MAX_ITEM_TITLE_LEN) || 'Exact Resource';
-  const safeUrl = (input.primaryUrl || `https://scholar.google.com/scholar?q=${encodeURIComponent(safeTitle)}`)
-    .trim()
-    .slice(0, MAX_ITEM_URL_LEN);
+  const rawUrl = (input.primaryUrl || '').trim();
+  const isSafeScheme = /^https?:\/\//i.test(rawUrl);
+  const safeUrl = (isSafeScheme ? rawUrl : `https://scholar.google.com/scholar?q=${encodeURIComponent(safeTitle)}`).slice(0, MAX_ITEM_URL_LEN);
+
   return {
     ownerId: ownerId.slice(0, MAX_ID_LEN),
     videoId: (input.videoId || '').trim().slice(0, MAX_VIDEO_ID_LEN),
     title: safeTitle,
     resourceType: (input.type || 'Custom Resource').trim().slice(0, MAX_RESOURCE_TYPE_LEN) || 'Custom Resource',
     description: (input.description || '').trim().slice(0, MAX_RESOURCE_DESC_LEN),
-    primaryUrl: safeUrl || 'https://scholar.google.com',
+    primaryUrl: safeUrl,
     authorOrCreator: (input.authorOrCreator || '').trim().slice(0, MAX_AUTHOR_LEN),
     formattedTime: (input.formattedTime || '').trim().slice(0, MAX_FORMATTED_TIME_LEN),
     exactQuote: (input.exactQuote || '').trim().slice(0, MAX_RESOURCE_QUOTE_LEN),
@@ -271,6 +272,7 @@ const LOCAL_ITEMS_KEY = 'opentranscript_saved_list_items_v1';
 const LOCAL_SUMMARIES_KEY = 'opentranscript_saved_summaries_v1';
 const LOCAL_RESOURCES_KEY = 'opentranscript_custom_exact_resources_v1';
 const LOCAL_HISTORY_KEY = 'opentranscript_activity_history_v1';
+const LAST_SYNCED_USER_KEY = 'opentranscript_last_synced_uid_v1';
 
 const historyListeners = new Set<(items: ActivityHistoryItem[]) => void>();
 let lastRecordedSignature = '';
@@ -1037,33 +1039,35 @@ export async function createCustomExactResource(input: {
 }): Promise<ExactVideoResource> {
   const user = auth.currentUser;
   const resourceId = generateSafeId('res');
+  const ownerId = user ? user.uid : 'local_user';
+  const sanitized = sanitizeCustomResourcePayload(ownerId, input);
 
   const createdResource: ExactVideoResource = {
     id: resourceId,
-    title: input.title.trim(),
+    title: sanitized.title,
     type: input.type,
-    description: input.description.trim(),
-    primaryUrl: input.primaryUrl.trim(),
+    description: sanitized.description,
+    primaryUrl: sanitized.primaryUrl,
     primaryLabel: 'Open Exact Resource',
-    authorOrCreator: input.authorOrCreator?.trim() || undefined,
-    formattedTime: input.formattedTime?.trim() || undefined,
-    timestampSeconds: parseTimeSeconds(input.formattedTime),
-    exactQuote: input.exactQuote?.trim() || undefined,
+    authorOrCreator: sanitized.authorOrCreator || undefined,
+    formattedTime: sanitized.formattedTime || undefined,
+    timestampSeconds: parseTimeSeconds(sanitized.formattedTime),
+    exactQuote: sanitized.exactQuote || undefined,
     verified: true,
     secondaryLinks: [
       {
         label: 'Google Scholar',
-        url: `https://scholar.google.com/scholar?q=${encodeURIComponent(input.title.trim())}`,
+        url: `https://scholar.google.com/scholar?q=${encodeURIComponent(sanitized.title)}`,
         sourceName: 'Google Scholar',
       },
       {
         label: 'Wikipedia',
-        url: `https://en.wikipedia.org/wiki/Special:Search?search=${encodeURIComponent(input.title.trim())}`,
+        url: `https://en.wikipedia.org/wiki/Special:Search?search=${encodeURIComponent(sanitized.title)}`,
         sourceName: 'Wikipedia',
       },
       {
         label: 'OpenLibrary',
-        url: `https://openlibrary.org/search?q=${encodeURIComponent(input.title.trim())}`,
+        url: `https://openlibrary.org/search?q=${encodeURIComponent(sanitized.title)}`,
         sourceName: 'OpenLibrary',
       },
     ],
@@ -1071,7 +1075,6 @@ export async function createCustomExactResource(input: {
 
   if (user) {
     const path = `resources/${resourceId}`;
-    const sanitized = sanitizeCustomResourcePayload(user.uid, input);
     try {
       await setDoc(doc(db, 'resources', resourceId), {
         ...sanitized,
