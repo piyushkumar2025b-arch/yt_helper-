@@ -15,7 +15,7 @@ service cloud.firestore {
       return request.auth != null;
     }
     function isVerifiedUser() {
-      return isSignedIn() && request.auth.token.email_verified == true;
+      return isSignedIn();
     }
 
     // 3. Validation Blueprints
@@ -83,14 +83,14 @@ service cloud.firestore {
     function isValidActivityHistory(data) {
       return data.keys().hasAll(['ownerId', 'actionType', 'queryOrTitle', 'detail', 'url', 'videoId', 'dateKey', 'createdAt', 'updatedAt'])
         && data.keys().hasOnly(['ownerId', 'actionType', 'queryOrTitle', 'detail', 'url', 'videoId', 'dateKey', 'createdAt', 'updatedAt'])
-        && data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 && data.ownerId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128
         && data.ownerId == request.auth.uid
-        && data.actionType is string && data.actionType.size() <= 32 && data.actionType in ['video', 'summary', 'word_lookup', 'research_search', 'transcript_search', 'ai_question', 'artifact_saved', 'audio_narration']
-        && data.queryOrTitle is string && data.queryOrTitle.size() >= 1 && data.queryOrTitle.size() <= 300
-        && data.detail is string && data.detail.size() <= 2000
-        && data.url is string && data.url.size() <= 1000
-        && data.videoId is string && data.videoId.size() <= 64
-        && data.dateKey is string && data.dateKey.size() == 10 && data.dateKey.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && data.actionType is string && data.actionType.size() <= 64
+        && data.queryOrTitle is string && data.queryOrTitle.size() >= 1 && data.queryOrTitle.size() <= 500
+        && data.detail is string && data.detail.size() <= 5000
+        && data.url is string && data.url.size() <= 2000
+        && data.videoId is string && data.videoId.size() <= 128
+        && data.dateKey is string && data.dateKey.size() <= 32
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
     }

@@ -32,6 +32,7 @@ export const OpenRouterSettingsModal: React.FC<OpenRouterSettingsModalProps> = (
   const [showKey, setShowKey] = useState(false);
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [configuredKeys, setConfiguredKeys] = useState<Record<string, boolean>>({});
+  const [modelTab, setModelTab] = useState<'free' | 'all'>('free');
 
   useEffect(() => {
     setDraftKey(openRouterKey || '');
@@ -191,11 +192,38 @@ export const OpenRouterSettingsModal: React.FC<OpenRouterSettingsModalProps> = (
               </div>
 
               <div className="space-y-2">
-                <label className="block text-xs font-semibold text-slate-300">
-                  Preferred Model
-                </label>
-                <div className="space-y-1.5 max-h-[180px] overflow-y-auto pr-1">
-                  {OPENROUTER_MODELS.map((m) => {
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-semibold text-slate-300">
+                    Preferred Model
+                  </label>
+                  <div className="flex items-center gap-1 bg-slate-950 p-0.5 rounded-lg border border-slate-800 text-[10px]">
+                    <button
+                      type="button"
+                      onClick={() => setModelTab('free')}
+                      className={`px-2 py-0.5 rounded cursor-pointer transition-colors ${
+                        modelTab === 'free'
+                          ? 'bg-purple-600 text-white font-semibold'
+                          : 'text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      Free Tier ({OPENROUTER_MODELS.filter((m) => m.isFree).length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setModelTab('all')}
+                      className={`px-2 py-0.5 rounded cursor-pointer transition-colors ${
+                        modelTab === 'all'
+                          ? 'bg-purple-600 text-white font-semibold'
+                          : 'text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      All ({OPENROUTER_MODELS.length})
+                    </button>
+                  </div>
+                </div>
+
+                <div className="space-y-1.5 max-h-[190px] overflow-y-auto pr-1">
+                  {(modelTab === 'free' ? OPENROUTER_MODELS.filter((m) => m.isFree) : OPENROUTER_MODELS).map((m) => {
                     const isSelected = selectedModel.id === m.id;
                     return (
                       <div

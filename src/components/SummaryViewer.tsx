@@ -28,6 +28,9 @@ import {
   Link2,
   FolderOpen,
   Cpu,
+  KeyRound,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import { speechService, SpeechItem, tokenizeSpeechWords } from '../services/speechService';
 import {
@@ -38,8 +41,9 @@ import {
   VideoMetadata,
   TranscriptSegment,
   ExactVideoResource,
+  OpenRouterModel,
 } from '../types';
-import { SUMMARY_PRESETS, APP_THEMES } from '../constants';
+import { SUMMARY_PRESETS, APP_THEMES, OPENROUTER_MODELS } from '../constants';
 import { getTypographyStyles, getContentWidthClass } from './TypographySettingsModal';
 import { SmartImage } from './SmartImage';
 import { isSafeHttpUrl } from '../utils/subtitleParser';
@@ -50,7 +54,12 @@ interface SummaryViewerProps {
   summary: SummaryResult | null;
   isLoading: boolean;
   isContinuing?: boolean;
-  onRegenerate: (type: SummaryType) => void;
+  onRegenerate: (
+    type: SummaryType,
+    overrideProvider?: 'openrouter' | 'gemini',
+    overrideModelId?: string,
+    overrideKey?: string
+  ) => void;
   onContinueSummary?: () => void;
   onSeekToTimestamp: (seconds: number) => void;
   transcriptText?: string;
@@ -61,8 +70,13 @@ interface SummaryViewerProps {
   onRefreshCustomResources?: (resources: ExactVideoResource[]) => void;
   onAppendCustomMarkdown?: (snippet: string, noticeLabel?: string) => void;
   provider?: 'openrouter' | 'gemini';
+  onSelectProvider?: (provider: 'openrouter' | 'gemini') => void;
   openRouterKey?: string;
+  onSaveOpenRouterKey?: (key: string) => void;
+  selectedModel?: OpenRouterModel;
   selectedModelId?: string;
+  onSelectModel?: (model: OpenRouterModel) => void;
+  onOpenSettings?: () => void;
   currentTheme?: ThemeId;
   onOpenVoiceSettings?: () => void;
   onOpenResearch?: () => void;
@@ -302,8 +316,13 @@ export const SummaryViewer: React.FC<SummaryViewerProps> = ({
   onRefreshCustomResources,
   onAppendCustomMarkdown,
   provider = 'gemini',
+  onSelectProvider,
   openRouterKey = '',
+  onSaveOpenRouterKey,
+  selectedModel,
   selectedModelId = 'meta-llama/llama-3.3-70b-instruct:free',
+  onSelectModel,
+  onOpenSettings,
   currentTheme = 'sepia',
   onOpenVoiceSettings,
   onOpenResearch,
@@ -328,6 +347,24 @@ export const SummaryViewer: React.FC<SummaryViewerProps> = ({
   const [activeWordIndex, setActiveWordIndex] = useState(-1);
   const [autoScroll, setAutoScroll] = useState<boolean>(speechService.getAutoScroll());
   const [activePreset, setActivePreset] = useState<SummaryType>(summary?.summaryType || 'massive');
+
+  const [isOpenRouterMenuOpen, setIsOpenRouterMenuOpen] = useState(false);
+  const [draftKey, setDraftKey] = useState(openRouterKey || '');
+  const [showKey, setShowKey] = useState(false);
+  const [keySavedBadge, setKeySavedBadge] = useState(false);
+  const openRouterRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setDraftKey(openRouterKey || '');
+  }, [openRouterKey]);
+
+  const activeModelObj = useMemo(() => {
+    return (
+      selectedModel ||
+      OPENROUTER_MODELS.find((m) => m.id === selectedModelId) ||
+      OPENROUTER_MODELS[0]
+    );
+  }, [selectedModel, selectedModelId]);
 
   const [isActionsOpen, setIsActionsOpen] = useState(false);
   const [isStyleOpen, setIsStyleOpen] = useState(false);
@@ -425,6 +462,9 @@ export const SummaryViewer: React.FC<SummaryViewerProps> = ({
       }
       if (styleRef.current && !styleRef.current.contains(e.target as Node)) {
         setIsStyleOpen(false);
+      }
+      if (openRouterRef.current && !openRouterRef.current.contains(e.target as Node)) {
+        setIsOpenRouterMenuOpen(false);
       }
     };
     document.addEventListener('mousedown', handleOutsideClick);
@@ -1194,6 +1234,230 @@ export const SummaryViewer: React.FC<SummaryViewerProps> = ({
                       </button>
                     );
                   })}
+                </div>
+              )}
+            </div>
+
+            {/* OpenRouter AI Model & Key Summary Option Dropdown */}
+            <div className="relative" ref={openRouterRef}>
+              <button
+                type="button"
+                onClick={() => setIsOpenRouterMenuOpen(!isOpenRouterMenuOpen)}
+                className={`flex items-center gap-1 px-1.5 py-0.5 rounded font-medium transition-colors cursor-pointer whitespace-nowrap border ${
+                  provider === 'openrouter'
+                    ? 'bg-purple-600/20 text-purple-300 border-purple-500/40 hover:bg-purple-600/30'
+                    : `${themeConfig.textSecondary} border-transparent hover:${themeConfig.textPrimary} hover:bg-slate-500/10`
+                }`}
+                title="Summary Model: OpenRouter Free Models & Key Configuration"
+              >
+                <KeyRound className="w-3 h-3 text-purple-400" />
+                <span className="font-semibold truncate max-w-[130px] sm:max-w-[180px]">
+                  {provider === 'openrouter'
+                    ? `OpenRouter: ${activeModelObj.name.replace(/ \(Free\)/i, '')}`
+                    : 'AI: Gemini'}
+                </span>
+                {provider === 'openrouter' && (
+                  <span className="text-[9px] px-1 py-0.2 rounded font-mono bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                    Free
+                  </span>
+                )}
+                {openRouterKey && (
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" title="Key Active" />
+                )}
+                <ChevronDown className="w-2.5 h-2.5 opacity-60" />
+              </button>
+
+              {isOpenRouterMenuOpen && (
+                <div
+                  className={`absolute right-0 mt-1 w-80 sm:w-96 rounded-xl ${themeConfig.cardBg} border ${themeConfig.border} shadow-2xl p-3 z-50 space-y-3 max-h-[82vh] overflow-y-auto`}
+                >
+                  {/* Top Bar: Engine Selection */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className={`text-[11px] font-semibold uppercase tracking-wider ${themeConfig.textMuted}`}>
+                        Summary AI Engine
+                      </span>
+                      {onOpenSettings && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsOpenRouterMenuOpen(false);
+                            onOpenSettings();
+                          }}
+                          className="text-[10px] text-indigo-400 hover:text-indigo-300 underline cursor-pointer"
+                        >
+                          Advanced Settings
+                        </button>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-2 gap-1.5 text-xs">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onSelectProvider?.('gemini');
+                        }}
+                        className={`p-2 rounded-lg border text-left cursor-pointer transition-all ${
+                          provider === 'gemini'
+                            ? `${themeConfig.accentBg} ${themeConfig.accent} font-semibold border-indigo-500/50 shadow-sm`
+                            : `border-slate-700/50 bg-slate-900/40 ${themeConfig.textSecondary} hover:border-slate-600`
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="font-semibold text-xs">Gemini (Built-in)</span>
+                          {provider === 'gemini' && <Check className="w-3 h-3" />}
+                        </div>
+                        <p className={`text-[10px] mt-0.5 line-clamp-1 ${themeConfig.textMuted}`}>
+                          Zero setup server fallback
+                        </p>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onSelectProvider?.('openrouter');
+                        }}
+                        className={`p-2 rounded-lg border text-left cursor-pointer transition-all ${
+                          provider === 'openrouter'
+                            ? 'bg-purple-600/20 text-purple-200 font-semibold border-purple-500/60 shadow-sm'
+                            : `border-slate-700/50 bg-slate-900/40 ${themeConfig.textSecondary} hover:border-slate-600`
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="font-semibold text-xs">OpenRouter</span>
+                          {provider === 'openrouter' && <Check className="w-3 h-3 text-purple-400" />}
+                        </div>
+                        <p className={`text-[10px] mt-0.5 line-clamp-1 ${themeConfig.textMuted}`}>
+                          Free Llama, DeepSeek &amp; Qwen
+                        </p>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* OpenRouter API Key Input */}
+                  <div className="p-2.5 rounded-lg bg-slate-950/40 border border-slate-700/40 space-y-1.5">
+                    <div className="flex items-center justify-between text-[11px]">
+                      <label className="font-semibold flex items-center gap-1.5 text-slate-200">
+                        <KeyRound className="w-3 h-3 text-purple-400" />
+                        <span>OpenRouter API Key</span>
+                      </label>
+                      <a
+                        href="https://openrouter.ai/keys"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-[10px] text-purple-400 hover:text-purple-300 underline"
+                      >
+                        Get Free Key
+                      </a>
+                    </div>
+
+                    <div className="flex items-center gap-1">
+                      <div className="relative flex-1">
+                        <input
+                          type={showKey ? 'text' : 'password'}
+                          value={draftKey}
+                          onChange={(e) => setDraftKey(e.target.value)}
+                          placeholder="sk-or-v1-... (optional for free models)"
+                          className="w-full px-2 py-1 pr-7 text-xs rounded bg-slate-900 border border-slate-700 focus:border-purple-500 text-slate-100 placeholder:text-slate-500 focus:outline-none font-mono"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowKey(!showKey)}
+                          className="absolute right-1.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 cursor-pointer"
+                        >
+                          {showKey ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                        </button>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onSaveOpenRouterKey?.(draftKey.trim());
+                          if (draftKey.trim()) onSelectProvider?.('openrouter');
+                          setKeySavedBadge(true);
+                          setTimeout(() => setKeySavedBadge(false), 2000);
+                        }}
+                        className="px-2.5 py-1 text-xs font-semibold rounded bg-purple-600 hover:bg-purple-500 text-white cursor-pointer transition-colors"
+                      >
+                        {keySavedBadge ? 'Saved!' : 'Save'}
+                      </button>
+                    </div>
+                    <p className="text-[10px] text-slate-400 leading-tight">
+                      Free models run via your key or server default. Stored safely in sessionStorage.
+                    </p>
+                  </div>
+
+                  {/* OpenRouter Free Tier Models */}
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className={`font-semibold uppercase tracking-wider ${themeConfig.textMuted}`}>
+                        Select Free Model
+                      </span>
+                      <span className="text-[10px] font-mono text-emerald-400 bg-emerald-500/10 px-1 rounded">
+                        11 Free Tier Models
+                      </span>
+                    </div>
+
+                    <div className="space-y-1 max-h-48 overflow-y-auto pr-1">
+                      {OPENROUTER_MODELS.filter((m) => m.isFree).map((m) => {
+                        const isSelected = activeModelObj.id === m.id;
+                        return (
+                          <div
+                            key={m.id}
+                            onClick={() => {
+                              if (onSelectModel) onSelectModel(m);
+                              onSelectProvider?.('openrouter');
+                            }}
+                            className={`p-2 rounded-lg border text-left cursor-pointer transition-colors ${
+                              isSelected
+                                ? 'border-purple-500/80 bg-purple-500/15'
+                                : 'border-slate-700/40 bg-slate-900/30 hover:border-slate-600'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-1.5 truncate">
+                                <span className="text-xs font-semibold text-slate-200 truncate">
+                                  {m.name}
+                                </span>
+                                {m.recommended && (
+                                  <span className="text-[9px] px-1 py-0.2 rounded font-medium bg-amber-500/20 text-amber-300">
+                                    Top
+                                  </span>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                <span className="text-[10px] font-mono text-slate-400">
+                                  {(m.contextLength / 1000).toFixed(0)}k
+                                </span>
+                                {isSelected && <Check className="w-3.5 h-3.5 text-purple-400" />}
+                              </div>
+                            </div>
+                            <p className="text-[10px] text-slate-400 line-clamp-1 mt-0.5">
+                              {m.description}
+                            </p>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Instant Action: Regenerate Summary with OpenRouter */}
+                  <div className="pt-1 border-t border-slate-700/50">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const keyToUse = draftKey.trim();
+                        if (keyToUse !== openRouterKey) {
+                          onSaveOpenRouterKey?.(keyToUse);
+                        }
+                        onSelectProvider?.('openrouter');
+                        onRegenerate(activePreset, 'openrouter', activeModelObj.id, keyToUse);
+                        setIsOpenRouterMenuOpen(false);
+                      }}
+                      className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-xs font-semibold bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white shadow-lg shadow-purple-600/25 transition-all cursor-pointer"
+                    >
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>Summarize with {activeModelObj.name}</span>
+                    </button>
+                  </div>
                 </div>
               )}
             </div>

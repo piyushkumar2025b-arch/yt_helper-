@@ -635,7 +635,10 @@ export default function App() {
     url: string,
     type: SummaryType,
     depth: DetailLevel,
-    currentSegments: TranscriptSegment[] = segments
+    currentSegments: TranscriptSegment[] = segments,
+    overrideProvider?: 'openrouter' | 'gemini',
+    overrideModelId?: string,
+    overrideKey?: string
   ) => {
     if (!textToSummarize || !textToSummarize.trim()) return;
 
@@ -648,10 +651,14 @@ export default function App() {
     setIsSummarizing(true);
     setErrorMessage(null);
 
+    const activeProvider = overrideProvider || provider;
+    const activeModelId = overrideModelId || selectedModel.id;
+    const activeKey = overrideKey !== undefined ? overrideKey : openRouterKey;
+
     try {
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (openRouterKey.trim()) {
-        headers['X-OpenRouter-Key'] = openRouterKey.trim();
+      if (activeKey.trim()) {
+        headers['X-OpenRouter-Key'] = activeKey.trim();
       }
 
       const res = await fetchWithRetry(
@@ -664,8 +671,9 @@ export default function App() {
             segments: currentSegments,
             title,
             url,
-            provider,
-            model: selectedModel.id,
+            provider: activeProvider,
+            openRouterKey: activeKey.trim(),
+            model: activeModelId,
             summaryType: type,
             detailLevel: depth,
           }),
@@ -740,20 +748,49 @@ export default function App() {
     }
   };
 
-  const scheduleRegenerate = (nextType: SummaryType, nextDepth: DetailLevel) => {
+  const scheduleRegenerate = (
+    nextType: SummaryType,
+    nextDepth: DetailLevel,
+    overrideProvider?: 'openrouter' | 'gemini',
+    overrideModelId?: string,
+    overrideKey?: string
+  ) => {
     if (regenDebounceRef.current) {
       window.clearTimeout(regenDebounceRef.current);
     }
     regenDebounceRef.current = window.setTimeout(() => {
       if (fullText && metadata) {
-        generateSummary(fullText, metadata.title, metadata.url, nextType, nextDepth);
+        generateSummary(
+          fullText,
+          metadata.title,
+          metadata.url,
+          nextType,
+          nextDepth,
+          segments,
+          overrideProvider,
+          overrideModelId,
+          overrideKey
+        );
       }
-    }, 350);
+    }, 250);
   };
 
-  const handleRegenerate = (type: SummaryType) => {
+  const handleRegenerate = (
+    type: SummaryType,
+    overrideProvider?: 'openrouter' | 'gemini',
+    overrideModelId?: string,
+    overrideKey?: string
+  ) => {
     setSummaryType(type);
-    scheduleRegenerate(type, detailLevel);
+    if (overrideProvider) setProvider(overrideProvider);
+    if (overrideModelId) {
+      const found = OPENROUTER_MODELS.find((m) => m.id === overrideModelId);
+      if (found) setSelectedModel(found);
+    }
+    if (overrideKey !== undefined) {
+      handleSaveKey(overrideKey);
+    }
+    scheduleRegenerate(type, detailLevel, overrideProvider, overrideModelId, overrideKey);
   };
 
   const handleContinueSummary = async () => {
@@ -1178,7 +1215,9 @@ export default function App() {
                 scheduleRegenerate(summaryType, lvl);
               }}
               selectedModel={selectedModel}
+              onSelectModel={setSelectedModel}
               provider={provider}
+              onSelectProvider={handleSelectProvider}
               hasOpenRouterKey={!!openRouterKey}
               onOpenSettings={() => setIsSettingsOpen(true)}
               onOpenVoiceSettings={() => setIsVoiceSettingsOpen(true)}
@@ -1308,8 +1347,13 @@ export default function App() {
                 onRefreshCustomResources={setCustomResources}
                 onAppendCustomMarkdown={handleAppendCustomMarkdown}
                 provider={provider}
+                onSelectProvider={handleSelectProvider}
                 openRouterKey={openRouterKey}
+                onSaveOpenRouterKey={handleSaveKey}
+                selectedModel={selectedModel}
                 selectedModelId={selectedModel.id}
+                onSelectModel={setSelectedModel}
+                onOpenSettings={() => setIsSettingsOpen(true)}
                 currentTheme={theme}
                 onOpenVoiceSettings={() => setIsVoiceSettingsOpen(true)}
                 onOpenResearch={() => setActiveTab('research')}

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { PanelLeft, Maximize2, Minimize2, SlidersHorizontal, Tv, Palette, Check, Cloud, LogIn, LogOut, FolderOpen, Cpu, Calendar } from 'lucide-react';
+import { PanelLeft, Maximize2, Minimize2, SlidersHorizontal, Tv, Palette, Check, Cloud, LogIn, LogOut, FolderOpen, Cpu, Calendar, KeyRound } from 'lucide-react';
 import { User } from 'firebase/auth';
 import { OpenRouterModel, ThemeId } from '../types';
 import { APP_THEMES } from '../constants';
@@ -30,6 +30,10 @@ interface HeaderProps {
 }
 
 export const Header: React.FC<HeaderProps> = ({
+  onOpenSettings,
+  hasOpenRouterKey = false,
+  selectedModel,
+  provider = 'gemini',
   currentTheme,
   onSelectTheme,
   onToggleSidebar,
@@ -175,6 +179,30 @@ export const Header: React.FC<HeaderProps> = ({
           >
             <Cpu className="w-3 h-3 text-indigo-400" />
             <span>Tech &amp; AI Words</span>
+          </button>
+        )}
+
+        {onOpenSettings && (
+          <button
+            type="button"
+            onClick={onOpenSettings}
+            className={`flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium rounded transition-colors cursor-pointer whitespace-nowrap ${
+              provider === 'openrouter'
+                ? 'bg-purple-600/90 text-white font-semibold'
+                : `${themeConfig.textSecondary} hover:${themeConfig.textPrimary} hover:bg-slate-500/10`
+            }`}
+            title="Configure OpenRouter Summary Option, Free Models, and API Key"
+          >
+            <KeyRound className="w-3 h-3 text-purple-300" />
+            <span className="hidden sm:inline">
+              {provider === 'openrouter'
+                ? `OpenRouter: ${selectedModel?.name?.replace(/ \(Free\)/i, '') || 'Free'}`
+                : 'AI: OpenRouter'}
+            </span>
+            <span className="sm:hidden">OpenRouter</span>
+            {hasOpenRouterKey && (
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" title="Key Saved" />
+            )}
           </button>
         )}
 

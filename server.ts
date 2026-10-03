@@ -96,11 +96,15 @@ async function startServer() {
   const ALLOWED_SERVER_OPENROUTER_MODELS = new Set([
     'google/gemma-3-27b-it:free',
     'meta-llama/llama-3.3-70b-instruct:free',
+    'meta-llama/llama-3.2-3b-instruct:free',
     'qwen/qwen-2.5-72b-instruct:free',
+    'qwen/qwen-2.5-coder-32b-instruct:free',
     'mistralai/mistral-small-3.1-24b-instruct:free',
+    'deepseek/deepseek-chat:free',
     'deepseek/deepseek-chat-v3-0324:free',
     'deepseek/deepseek-r1:free',
     'google/gemini-2.0-flash-exp:free',
+    'google/gemini-2.0-flash-thinking-exp:free',
     'openrouter/auto',
   ]);
 

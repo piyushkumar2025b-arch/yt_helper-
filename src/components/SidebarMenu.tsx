@@ -38,7 +38,7 @@ import {
   SampleVideo,
   YouTubeSearchResult,
 } from '../types';
-import { SAMPLE_VIDEOS, SUMMARY_PRESETS, APP_THEMES } from '../constants';
+import { SAMPLE_VIDEOS, SUMMARY_PRESETS, APP_THEMES, OPENROUTER_MODELS } from '../constants';
 import {
   VideoPlayerPanel,
   VideoPlayerSize,
@@ -73,8 +73,10 @@ interface SidebarMenuProps {
   onChangeDetailLevel: (level: DetailLevel) => void;
   selectedModel: OpenRouterModel;
   provider: 'openrouter' | 'gemini';
+  onSelectProvider?: (provider: 'openrouter' | 'gemini') => void;
   hasOpenRouterKey: boolean;
   onOpenSettings: () => void;
+  onSelectModel?: (model: OpenRouterModel) => void;
   onOpenVoiceSettings: () => void;
   onOpenTypography: () => void;
   currentTheme: ThemeId;
@@ -120,8 +122,10 @@ export const SidebarMenu: React.FC<SidebarMenuProps> = ({
   onChangeDetailLevel,
   selectedModel,
   provider,
+  onSelectProvider,
   hasOpenRouterKey,
   onOpenSettings,
+  onSelectModel,
   onOpenVoiceSettings,
   onOpenTypography,
   currentTheme,
@@ -717,6 +721,81 @@ export const SidebarMenu: React.FC<SidebarMenuProps> = ({
                   {lvl.label}
                 </button>
               ))}
+            </div>
+
+            {/* AI Summary Engine: OpenRouter Free Models & Key */}
+            <div className="pt-2 border-t border-slate-500/10 space-y-1.5">
+              <div className="flex items-center justify-between text-[10px]">
+                <span className={`font-semibold uppercase tracking-wider ${themeConfig.textMuted}`}>
+                  Summary AI Engine
+                </span>
+                <button
+                  type="button"
+                  onClick={onOpenSettings}
+                  className="text-purple-400 hover:text-purple-300 font-medium flex items-center gap-1 cursor-pointer"
+                  title="Configure OpenRouter API Key and Models"
+                >
+                  <KeyRound className="w-2.5 h-2.5" />
+                  <span>{hasOpenRouterKey ? 'Key Active' : 'Enter Key'}</span>
+                </button>
+              </div>
+
+              <div className="grid grid-cols-2 gap-1 text-[11px]">
+                <button
+                  type="button"
+                  onClick={() => onSelectProvider?.('gemini')}
+                  className={`py-1 px-1.5 rounded font-medium text-center transition-colors cursor-pointer ${
+                    provider === 'gemini'
+                      ? `${themeConfig.accentBg} ${themeConfig.accent} font-semibold`
+                      : `${themeConfig.textMuted} hover:${themeConfig.textPrimary} bg-slate-500/5 hover:bg-slate-500/10`
+                  }`}
+                >
+                  Gemini (Built-in)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onSelectProvider?.('openrouter')}
+                  className={`py-1 px-1.5 rounded font-medium text-center transition-colors cursor-pointer ${
+                    provider === 'openrouter'
+                      ? 'bg-purple-600/90 text-white font-semibold'
+                      : `${themeConfig.textMuted} hover:${themeConfig.textPrimary} bg-slate-500/5 hover:bg-slate-500/10`
+                  }`}
+                >
+                  OpenRouter (Free)
+                </button>
+              </div>
+
+              {provider === 'openrouter' && (
+                <div className="space-y-1 pt-0.5">
+                  <div className="flex items-center justify-between text-[10px]">
+                    <span className={themeConfig.textMuted}>Free Model:</span>
+                    <span className="text-emerald-400 font-mono text-[9px]">Zero Cost</span>
+                  </div>
+                  <select
+                    value={selectedModel.id}
+                    onChange={(e) => {
+                      const found = OPENROUTER_MODELS.find((m) => m.id === e.target.value);
+                      if (found && onSelectModel) onSelectModel(found);
+                    }}
+                    className={`w-full py-1 px-2 rounded text-[11px] bg-slate-500/10 ${themeConfig.textPrimary} cursor-pointer focus:outline-none`}
+                  >
+                    <optgroup label="OpenRouter Free Tier Models" className="bg-slate-900 text-white font-semibold">
+                      {OPENROUTER_MODELS.filter((m) => m.isFree).map((m) => (
+                        <option key={m.id} value={m.id} className="bg-slate-900 text-white">
+                          {m.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="Paid Models (Requires Key)" className="bg-slate-900 text-white font-semibold">
+                      {OPENROUTER_MODELS.filter((m) => !m.isFree).map((m) => (
+                        <option key={m.id} value={m.id} className="bg-slate-900 text-white">
+                          {m.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                  </select>
+                </div>
+              )}
             </div>
           </div>
         </div>
