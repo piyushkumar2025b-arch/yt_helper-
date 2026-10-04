@@ -15,6 +15,13 @@ import {
 } from '../utils/subtitleParser.ts';
 import { parseSubtitlePayload } from './transcriptHelper.ts';
 import { MediaSourceType, VideoMetadata, PodcastEpisodeItem } from '../types.ts';
+import {
+  safeFetch,
+  safeFetchText,
+  safeFetchJson,
+  DEFAULT_MAX_TEXT_BYTES,
+  DEFAULT_MAX_MEDIA_BYTES,
+} from './safeFetch.ts';
 
 export interface ExtractedMediaResult {
   metadata: VideoMetadata;
@@ -466,16 +473,13 @@ export async function fetchPodcastRssMetadataAndTranscript(
 
   let xmlText = '';
   try {
-    const res = await fetch(feedUrl, {
-      signal: AbortSignal.timeout(8000),
+    xmlText = await safeFetchText(feedUrl, DEFAULT_MAX_TEXT_BYTES, {
+      timeoutMs: 8000,
       headers: {
         'User-Agent': 'Mozilla/5.0 (compatible; OpenTranscriptAI/1.0; PodcastBot)',
         Accept: 'application/rss+xml, application/xml, text/xml, */*',
       },
     });
-    if (res.ok) {
-      xmlText = await res.text();
-    }
   } catch (err: any) {
     if (!isHuberman) {
       throw new Error(`Failed to load podcast RSS feed: ${err?.message || 'Network timeout'}`);
@@ -547,12 +551,13 @@ export async function fetchPodcastRssMetadataAndTranscript(
 
   // Check if selected episode has a Podcast 2.0 WebVTT transcript URL
   let segments: ParsedSegment[] = [];
+  let isTrueTranscript = false;
   if (activeEp.transcriptUrl) {
     try {
-      const trRes = await fetch(activeEp.transcriptUrl, { signal: AbortSignal.timeout(5000) });
-      if (trRes.ok) {
-        const trText = await trRes.text();
-        segments = parseSubtitlePayload(trText, true) || [];
+      const trText = await safeFetchText(activeEp.transcriptUrl, DEFAULT_MAX_TEXT_BYTES, { timeoutMs: 6000 });
+      segments = parseSubtitlePayload(trText, true) || [];
+      if (segments.length > 0) {
+        isTrueTranscript = true;
       }
     } catch {
       // fallback
@@ -561,6 +566,7 @@ export async function fetchPodcastRssMetadataAndTranscript(
 
   // Curated showcase transcript for Huberman Focus episode
   if (isHuberman && segments.length === 0) {
+    isTrueTranscript = true;
     segments = [
       { start: 0, duration: 30, formattedTime: '00:00', text: 'Welcome to the Huberman Lab Podcast, where we discuss science and science-based tools for everyday life. I’m Andrew Huberman, and I’m a professor of neurobiology and ophthalmology at Stanford School of Medicine.' },
       { start: 30, duration: 45, formattedTime: '00:30', text: 'Today, we are discussing focus: the biological mechanisms that allow the brain to direct attention toward specific stimuli and thoughts while suppressing irrelevant sensory distractions.' },
@@ -574,8 +580,10 @@ export async function fetchPodcastRssMetadataAndTranscript(
   }
 
   if (segments.length === 0) {
-    // Segment the episode description / show notes
-    const textToSegment = activeEp.description || `${activeEp.title}. An in-depth podcast conversation hosted on ${channelTitle}. Exploring practical principles, research findings, and technical discourse.`;
+    // Segment the episode description / show notes with explicit provenance marker (BUG-008)
+    const textToSegment = activeEp.description
+      ? `[Podcast Show Notes & Summary]: ${activeEp.description}`
+      : `${activeEp.title}. An in-depth podcast episode hosted on ${channelTitle}.`;
     segments = segmentPlainText(textToSegment);
   }
 
@@ -594,7 +602,7 @@ export async function fetchPodcastRssMetadataAndTranscript(
       thumbnailUrl: channelArtwork,
       durationSeconds: Math.round(durationSec),
       durationFormatted: formatTime(durationSec),
-      sourceType: 'podcast_rss',
+      sourceType: isTrueTranscript ? 'podcast_rss' : 'podcast_description',
       mediaUrl: activeEp.audioUrl,
       podcastFeedUrl: feedUrl,
       episodes,
@@ -660,13 +668,48 @@ export async function fetchDirectMediaMetadataAndTranscript(
     };
   }
 
-  // General audio/video file: fallback structured segmentation
-  const defaultText = `${displayTitle}. Direct ${isAudio ? 'audio recording' : 'video file'} stream hosted at ${parsed.hostname}. Listen with time-synced audio playback and deep AI research tools.`;
-  const segments = segmentPlainText(defaultText);
-  const fullText = segments.map((s) => s.text).join(' ');
+  // General audio/video file: attempt AI transcription if Gemini is configured (BUG-007)
+  if (process.env.GEMINI_API_KEY) {
+    try {
+      const mediaRes = await safeFetch(url, {
+        timeoutMs: 12000,
+        maxBytes: DEFAULT_MAX_MEDIA_BYTES,
+      });
+      if (mediaRes.ok) {
+        const arrayBuf = await mediaRes.arrayBuffer();
+        if (arrayBuf.byteLength > 0 && arrayBuf.byteLength <= DEFAULT_MAX_MEDIA_BYTES) {
+          const mime = isAudio ? 'audio/mp3' : 'video/mp4';
+          const transcribed = await transcribeUploadedMedia(
+            Buffer.from(arrayBuf).toString('base64'),
+            mime,
+            displayTitle
+          );
+          if (transcribed.segments && transcribed.segments.length > 0) {
+            return {
+              ...transcribed,
+              metadata: {
+                ...transcribed.metadata,
+                url,
+                mediaUrl: url,
+                sourceType: isAudio ? 'direct_audio' : 'direct_video',
+              },
+            };
+          }
+        }
+      }
+    } catch (aiErr) {
+      console.warn('Direct media remote transcription failed, using stream playback notice:', aiErr);
+    }
+  }
+
+  // Never fabricate fake dialog segments (BUG-007)
+  const mediaNotice = `[Direct Media Stream]: Spoken speech transcript could not be automatically extracted from this remote file. Use the audio/video player above to listen, or upload/paste the transcript manually.`;
+  const segments: ParsedSegment[] = [
+    { start: 0, duration: 60, formattedTime: '00:00', text: mediaNotice },
+  ];
+  const fullText = mediaNotice;
   const totalWords = fullText.split(/\s+/).filter(Boolean).length;
-  const lastSeg = segments[segments.length - 1];
-  const durationSeconds = lastSeg ? lastSeg.start + lastSeg.duration : 300;
+  const durationSeconds = 300;
 
   return {
     metadata: {
@@ -690,6 +733,84 @@ export async function fetchDirectMediaMetadataAndTranscript(
 }
 
 /**
+ * Fetches Loom video metadata and constructs clean player metadata (BUG-005)
+ */
+export async function fetchLoomMetadataAndTranscript(
+  url: string,
+  loomId?: string
+): Promise<ExtractedMediaResult> {
+  const cleanId = loomId || url.split('/share/')[1]?.split('?')[0] || 'loom_video';
+  let title = 'Loom Video';
+  let author = 'Loom Creator';
+  let thumbnail = '';
+
+  try {
+    const oembedUrl = `https://www.loom.com/v1/oembed?url=${encodeURIComponent(url)}`;
+    const data = await safeFetchJson<any>(oembedUrl, 500000, { timeoutMs: 5000 });
+    if (data?.title) title = data.title;
+    if (data?.author_name) author = data.author_name;
+    if (data?.thumbnail_url) thumbnail = data.thumbnail_url;
+  } catch {}
+
+  const notice = `[Loom Video Recording]: Closed captions are not publicly available via Loom's API without workspace permissions. Watch the recording above and paste the transcript manually to generate an AI summary.`;
+  const segments: ParsedSegment[] = [
+    { start: 0, duration: 60, formattedTime: '00:00', text: notice },
+  ];
+
+  return {
+    metadata: {
+      videoId: cleanId,
+      url,
+      title,
+      authorName: author,
+      thumbnailUrl: thumbnail,
+      durationSeconds: 180,
+      durationFormatted: '03:00',
+      sourceType: 'loom',
+      embedUrl: `https://www.loom.com/embed/${cleanId}`,
+      totalSegments: 1,
+      totalWords: notice.split(/\s+/).length,
+      estimatedTokens: 40,
+    },
+    segments,
+    fullText: notice,
+  };
+}
+
+/**
+ * Fetches Twitch broadcast metadata and constructs clean player metadata (BUG-006)
+ */
+export async function fetchTwitchMetadataAndTranscript(
+  url: string
+): Promise<ExtractedMediaResult> {
+  const parsed = new URL(url);
+  const channel = parsed.pathname.slice(1).split('/')[0] || 'Twitch Streamer';
+  const notice = `[Twitch Broadcast]: Automated live captions are unavailable for this Twitch stream. Watch in the embedded player and paste any spoken text manually.`;
+  const segments: ParsedSegment[] = [
+    { start: 0, duration: 60, formattedTime: '00:00', text: notice },
+  ];
+
+  return {
+    metadata: {
+      videoId: `twitch_${channel}`,
+      url,
+      title: `${channel} on Twitch`,
+      authorName: channel,
+      thumbnailUrl: '',
+      durationSeconds: 300,
+      durationFormatted: '05:00',
+      sourceType: 'twitch',
+      embedUrl: `https://player.twitch.tv/?channel=${channel}&parent=${parsed.hostname}`,
+      totalSegments: 1,
+      totalWords: notice.split(/\s+/).length,
+      estimatedTokens: 40,
+    },
+    segments,
+    fullText: notice,
+  };
+}
+
+/**
  * Fetches and extracts web articles / documents into structured segments
  */
 export async function fetchWebArticleMetadataAndTranscript(
@@ -697,19 +818,13 @@ export async function fetchWebArticleMetadataAndTranscript(
   customTitle?: string
 ): Promise<ExtractedMediaResult> {
   const parsed = new URL(url);
-  const res = await fetch(url, {
-    signal: AbortSignal.timeout(8000),
+  const html = await safeFetchText(url, DEFAULT_MAX_TEXT_BYTES, {
+    timeoutMs: 8000,
     headers: {
       'User-Agent': 'Mozilla/5.0 (compatible; OpenTranscriptAI/1.0; ResearchBot)',
       Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
     },
   });
-
-  if (!res.ok) {
-    throw new Error(`Failed to load article from URL (HTTP ${res.status}).`);
-  }
-
-  const html = await res.text();
 
   // Extract <title>
   const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);

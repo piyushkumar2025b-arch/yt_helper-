@@ -12,8 +12,8 @@ describe('constants and theme definitions', () => {
   it('has Warm Sepia theme as default and preserved', () => {
     assert.ok(APP_THEMES.sepia);
     assert.equal(APP_THEMES.sepia.name, 'Warm Sepia');
-    assert.equal(APP_THEMES.sepia.pageBg, 'bg-[#f4ecd8]');
-    assert.equal(APP_THEMES.sepia.cardBg, 'bg-[#efe4c8]');
+    assert.equal(APP_THEMES.sepia.pageBg, 'bg-[#fbf7ee]');
+    assert.equal(APP_THEMES.sepia.cardBg, 'bg-[#f5edd9]');
   });
 
   it('contains categorized daylight and dark themes with valid color definitions', () => {

@@ -35,11 +35,16 @@ import {
   fetchVimeoMetadataAndTranscript,
   fetchDailymotionMetadataAndTranscript,
   fetchTedTalkMetadataAndTranscript,
+  fetchLoomMetadataAndTranscript,
+  fetchTwitchMetadataAndTranscript,
   fetchPodcastRssMetadataAndTranscript,
   fetchDirectMediaMetadataAndTranscript,
   fetchWebArticleMetadataAndTranscript,
   transcribeUploadedMedia,
 } from './src/server/mediaExtractor.ts';
+import { authenticateFirebaseUser, requireAuthOrUserKey } from './src/server/authMiddleware.ts';
+import { safeFetch, safeFetchText, safeFetchJson, DEFAULT_MAX_TEXT_BYTES } from './src/server/safeFetch.ts';
+import { sha256Digest, BoundedCache } from './src/server/cacheHelper.ts';
 
 dotenv.config();
 
@@ -185,6 +190,8 @@ async function startServer() {
     }
   }
 
+  app.use('/api', authenticateFirebaseUser);
+
   app.use('/api', (req: Request, res: Response, next: NextFunction) => {
     const origin = req.headers.origin;
     if (origin) {
@@ -219,7 +226,17 @@ async function startServer() {
 
     // Use req.ip (which only honors X-Forwarded-For when trust proxy is explicitly configured)
     const clientIp = req.ip || req.socket.remoteAddress || 'unknown';
-    const isLlmRoute = ['/summarize', '/chat', '/continue-summary', '/deep-dive', '/translate'].includes(req.path);
+    // All cost-bearing and generative AI routes categorized under strict rate bucket (BUG-013)
+    const isLlmRoute = [
+      '/summarize',
+      '/chat',
+      '/continue-summary',
+      '/deep-dive',
+      '/translate',
+      '/transcribe-audio',
+      '/extract-key-ideas',
+      '/tts',
+    ].includes(req.path);
     const rateCheck = defaultRateLimiter.check(clientIp, isLlmRoute);
 
     if (!rateCheck.allowed) {
@@ -232,6 +249,24 @@ async function startServer() {
       });
       return;
     }
+
+    // Protect expensive AI routes with authentication or client key (BUG-003)
+    const EXPENSIVE_AI_ROUTES = new Set([
+      '/summarize',
+      '/continue-summary',
+      '/deep-dive',
+      '/chat',
+      '/transcribe-audio',
+      '/extract-key-ideas',
+      '/tts',
+      '/translate',
+    ]);
+
+    if (EXPENSIVE_AI_ROUTES.has(req.path)) {
+      requireAuthOrUserKey(req, res, next);
+      return;
+    }
+
     next();
   });
 
@@ -336,6 +371,20 @@ async function startServer() {
         return;
       }
 
+      // Branch C2: Loom Recording (BUG-005)
+      if (detected.type === 'loom') {
+        const result = await fetchLoomMetadataAndTranscript(detected.cleanUrl || rawInput, detected.id);
+        res.json({ ok: true, ...result });
+        return;
+      }
+
+      // Branch C3: Twitch Broadcast (BUG-006)
+      if (detected.type === 'twitch') {
+        const result = await fetchTwitchMetadataAndTranscript(detected.cleanUrl || rawInput);
+        res.json({ ok: true, ...result });
+        return;
+      }
+
       // Branch D: Podcast RSS Feed
       if (detected.type === 'podcast_rss') {
         const epIdx = parseInt(String(req.body?.episodeIndex || req.query.episodeIndex || '0'), 10) || 0;
@@ -351,16 +400,10 @@ async function startServer() {
         return;
       }
 
-      // Branch F: Direct Subtitle URL
+      // Branch F: Direct Subtitle URL with SSRF redirect protection (BUG-009, BUG-011)
       if (detected.type === 'direct_subtitle') {
-        const safe = await isSafePublicUrl(rawInput);
-        if (!safe) {
-          res.status(400).json({ error: 'Invalid or restricted URL.' });
-          return;
-        }
-        const directRes = await fetch(rawInput, { signal: AbortSignal.timeout(8000) });
-        if (directRes.ok) {
-          const bodyText = await directRes.text();
+        try {
+          const bodyText = await safeFetchText(rawInput, DEFAULT_MAX_TEXT_BYTES, { timeoutMs: 8000 });
           const parsedSegments = parseSubtitlePayload(bodyText, true);
           if (parsedSegments && parsedSegments.length > 0) {
             const fullText = parsedSegments.map((s) => s.text).join(' ');
@@ -386,6 +429,9 @@ async function startServer() {
             });
             return;
           }
+        } catch (subErr: any) {
+          res.status(400).json({ error: `Could not fetch subtitle file: ${subErr?.message || 'Access restricted'}` });
+          return;
         }
       }
 
@@ -518,15 +564,45 @@ async function startServer() {
   // 1b. POST /api/transcribe-audio - Multimodal Gemini speech-to-text for uploaded audio / video files
   app.post('/api/transcribe-audio', async (req: Request, res: Response) => {
     try {
-      const { audioBase64, mimeType, filename } = req.body || {};
-      if (!audioBase64) {
-        res.status(400).json({ error: 'Please provide audioBase64 payload to transcribe.' });
+      const { audioBase64, mimeType = 'audio/mp3', filename = 'Uploaded Audio' } = req.body || {};
+      if (!audioBase64 || typeof audioBase64 !== 'string') {
+        res.status(400).json({ error: 'Please provide valid audioBase64 payload to transcribe.' });
         return;
       }
+
+      const ALLOWED_AUDIO_MIMES = new Set([
+        'audio/mpeg',
+        'audio/mp3',
+        'audio/wav',
+        'audio/ogg',
+        'audio/webm',
+        'audio/aac',
+        'audio/m4a',
+        'audio/x-m4a',
+        'audio/flac',
+        'audio/opus',
+        'video/mp4',
+        'video/webm',
+      ]);
+      const normalizedMime = String(mimeType).toLowerCase().trim().split(';')[0];
+      if (!ALLOWED_AUDIO_MIMES.has(normalizedMime)) {
+        res.status(400).json({
+          error: `Unsupported media format "${normalizedMime}". Supported: mp3, wav, m4a, ogg, webm, mp4.`,
+        });
+        return;
+      }
+
+      const approxBytes = Math.round((audioBase64.length * 3) / 4);
+      if (approxBytes > 25 * 1024 * 1024) {
+        res.status(400).json({ error: 'Uploaded media file exceeds maximum allowed limit of 25 MB.' });
+        return;
+      }
+
+      const cleanFilename = String(filename).slice(0, 150).replace(/[^\w\s\.\-]/g, '') || 'Uploaded Media';
       const result = await transcribeUploadedMedia(
         audioBase64,
-        mimeType || 'audio/mp3',
-        filename || 'Uploaded Audio'
+        normalizedMime,
+        cleanFilename
       );
       res.json({ ok: true, ...result });
     } catch (err: any) {
@@ -1316,6 +1392,23 @@ ${transcript.slice(0, 200000)}
       const headingMatches = previousMarkdown.match(/^#{1,3}\s+.+$/gm) || [];
       const coveredHeadings = headingMatches.slice(-8).join('\n');
 
+      // Detect last covered timestamp to offset transcript for long videos (BUG-048)
+      const lastTsMatches = Array.from(trailingSnippet.matchAll(/\[(\d{1,2}:\d{2}(?::\d{2})?)\]/g));
+      const lastMatch = lastTsMatches.length > 0 ? (lastTsMatches[lastTsMatches.length - 1] as unknown as string[]) : null;
+      const lastTs = lastMatch && lastMatch[1] ? lastMatch[1] : null;
+
+      let transcriptSlice = transcript;
+      if (transcript.length > 190000 && lastTs) {
+        const tsPos = transcript.indexOf(`[${lastTs}]`);
+        if (tsPos > 1000) {
+          transcriptSlice = transcript.slice(tsPos - 500, tsPos + 185000);
+        } else {
+          transcriptSlice = transcript.slice(0, 190000);
+        }
+      } else {
+        transcriptSlice = transcript.slice(0, 190000);
+      }
+
       const continuationSystemInstruction = `You are a warm, clear human writer continuing an in-depth video breakdown that paused before finishing.
 
 CRITICAL CONTINUATION RULES:
@@ -1330,7 +1423,7 @@ DETAIL LEVEL: ${detailLevel} (Massive, exhaustive detail)
 ORIGINAL SUMMARY TYPE: ${summaryType}
 
 VIDEO FULL TRANSCRIPT:
-${transcript.slice(0, 190000)}
+${transcriptSlice}
 
 ==================================================
 PREVIOUS HEADINGS ALREADY COVERED:
@@ -1404,7 +1497,15 @@ If the last sentence above is unfinished, complete it immediately and then conti
       }
 
       const prevTrimmed = previousMarkdown.trimEnd();
-      const nextTrimmed = continuationText.trimStart();
+      let nextTrimmed = continuationText.trimStart();
+
+      // Seam overlap deduplication (BUG-049)
+      const prevLines = prevTrimmed.split('\n').filter(Boolean);
+      const prevLastLine = (prevLines[prevLines.length - 1] || '').trim();
+      if (prevLastLine && prevLastLine.length > 5 && nextTrimmed.startsWith(prevLastLine)) {
+        nextTrimmed = nextTrimmed.slice(prevLastLine.length).trimStart();
+      }
+
       const endsWithSentenceEnd = /[.!?:\n#\-*`]$/.test(prevTrimmed);
 
       let merged = '';
@@ -1721,9 +1822,8 @@ ${transcript.slice(0, 120000)}
         }
       }
 
-      // 2. Fallback if YouTube Data API v3 returned empty
-      if (videos.length === 0) {
-        const queryVariant = page > 0 ? `${q} part ${page + 1}` : q;
+      // 2. Fallback if YouTube Data API v3 returned empty (BUG-022, BUG-023)
+      if (videos.length === 0 && page === 0) {
         const pipedMirrors = [
           'https://api.piped.private.coffee',
           'https://pipedapi.kavin.rocks',
@@ -1731,13 +1831,13 @@ ${transcript.slice(0, 120000)}
         ];
         for (const mirror of pipedMirrors) {
           try {
-            const pRes = await fetch(`${mirror}/search?q=${encodeURIComponent(queryVariant)}&filter=videos`, {
+            const pRes = await fetch(`${mirror}/search?q=${encodeURIComponent(q)}&filter=videos`, {
               signal: AbortSignal.timeout(4000),
             });
             if (pRes.ok) {
               const pData = await pRes.json() as any;
               const items = pData.items || [];
-              nextPageToken = pData.nextpage || `fallback-page-${page + 1}`;
+              nextPageToken = pData.nextpage ? String(pData.nextpage) : null;
               for (const item of items) {
                 const vidMatch = String(item.url || '').match(/v=([a-zA-Z0-9_-]{11})/);
                 const vid = vidMatch ? vidMatch[1] : null;
@@ -1765,7 +1865,7 @@ ${transcript.slice(0, 120000)}
         query: q,
         page,
         nextPageToken,
-        hasMore: Boolean(nextPageToken || videos.length > 0),
+        hasMore: Boolean(nextPageToken),
         videos,
       });
     } catch (err: any) {
@@ -3382,17 +3482,40 @@ ${transcript.slice(0, 120000)}
   // 11. POST /api/tts - Multi-Engine Studio Neural Text-to-Speech API with Exact Word Boundaries
   app.post('/api/tts', async (req: Request, res: Response) => {
     try {
-      const { text, voiceName = 'studio:gemini:Kore', speakingRate = 1.0, lang = 'en-US' } = req.body;
-      const cleanText = String(text || '').trim().slice(0, 2500);
+      const {
+        text,
+        voiceName = 'studio:gemini:Kore',
+        speakingRate = 1.0,
+        pitch = 1.0,
+        lang = 'en-US',
+      } = req.body;
+      const rawText = String(text || '').trim();
+      const cleanText = rawText.slice(0, 3500);
+      const isTruncated = rawText.length > cleanText.length;
+
       if (!cleanText) {
         res.status(400).json({ error: 'Text is required for TTS synthesis.' });
         return;
       }
 
-      const cacheKey = `${voiceName}:${lang}:${cleanText.slice(0, 400)}:${cleanText.length}`;
+      // Hash entire synthesis input, voice, rate, and pitch (BUG-017, BUG-031)
+      const cacheKey = sha256Digest({
+        text: cleanText,
+        voiceName,
+        lang,
+        speakingRate: Number(speakingRate).toFixed(2),
+        pitch: Number(pitch).toFixed(2),
+      });
+
       const cached = ttsAudioCache.get(cacheKey);
       if (cached) {
-        res.json({ ok: true, ...cached });
+        res.json({
+          ok: true,
+          ...cached,
+          isTruncated,
+          processedCharacters: cleanText.length,
+          originalCharacters: rawText.length,
+        });
         return;
       }
 
@@ -3411,7 +3534,12 @@ ${transcript.slice(0, 120000)}
                 ? 'en-IN-NeerjaNeural'
                 : 'en-US-AriaNeural');
 
-        const tts = new EdgeTTS(cleanText, edgeVoice);
+        const ratePercent = Math.round((Number(speakingRate) - 1.0) * 100);
+        const pitchPercent = Math.round((Number(pitch) - 1.0) * 100);
+        const rateStr = `${ratePercent >= 0 ? '+' : ''}${ratePercent}%`;
+        const pitchStr = `${pitchPercent >= 0 ? '+' : ''}${pitchPercent}%`;
+
+        const tts = new EdgeTTS(cleanText, edgeVoice, { rate: rateStr, pitch: pitchStr });
         const synthRes = await tts.synthesize();
         const arrayBuf = await synthRes.audio.arrayBuffer();
         const mp3Buf = Buffer.from(arrayBuf);
@@ -3425,9 +3553,13 @@ ${transcript.slice(0, 120000)}
 
           const resultPayload = {
             provider: `edge-neural-${edgeVoice}`,
+            engineUsed: 'edge-neural',
             audioBase64: mp3Buf.toString('base64'),
             mimeType: 'audio/mp3',
             wordBoundaries,
+            isTruncated,
+            processedCharacters: cleanText.length,
+            originalCharacters: rawText.length,
           };
           if (ttsAudioCache.size > 120) {
             const oldest = ttsAudioCache.keys().next().value;
@@ -4779,8 +4911,8 @@ Respond strictly as JSON with these keys:
     }
   });
 
-  // 15b. POST /api/extract-key-ideas - Deep AI + Multi-Source Key Ideas & Crucial Words Extractor for Any Video
-  const keyIdeasCache = new Map<string, { terms: any[]; takeaways: any[] }>();
+  // 15b. POST /api/extract-key-ideas - Deep AI + Multi-Source Key Ideas & Crucial Words Extractor (BUG-029 BoundedCache)
+  const keyIdeasCache = new BoundedCache<string, { terms: any[]; takeaways: any[] }>(120);
   app.post('/api/extract-key-ideas', async (req: Request, res: Response) => {
     try {
       const { videoTitle = '', summaryMarkdown = '', transcriptSample = '' } = req.body || {};
@@ -4790,7 +4922,8 @@ Respond strictly as JSON with these keys:
         return;
       }
 
-      const cacheKey = `${videoTitle.slice(0, 80)}_${combinedInput.length}_${combinedInput.slice(0, 120)}`;
+      // Cryptographic digest for cache key (BUG-032)
+      const cacheKey = sha256Digest({ videoTitle, combinedInput });
       if (keyIdeasCache.has(cacheKey)) {
         res.json({ ok: true, ...keyIdeasCache.get(cacheKey)! });
         return;
@@ -4871,14 +5004,15 @@ Provide 4 to 6 takeaways and 8 to 14 terms.`;
         }
       }
 
+      // Explicitly label research portal links (BUG-046)
       const buildSourcesForQuery = (qStr: string) => {
         const clean = encodeURIComponent(qStr.replace(/\(.*?\)/g, '').trim());
         return [
-          { label: 'Wikipedia', url: `https://en.wikipedia.org/wiki/Special:Search?search=${clean}` },
-          { label: 'Wiktionary', url: `https://en.wiktionary.org/wiki/Special:Search?search=${clean}` },
-          { label: 'OpenAlex Research', url: `https://openalex.org/works?search=${clean}` },
-          { label: 'Google Scholar', url: `https://scholar.google.com/scholar?q=${clean}` },
-          { label: 'Wikidata Graph', url: `https://www.wikidata.org/w/index.php?search=${clean}` },
+          { label: 'Wikipedia (Research Portal)', url: `https://en.wikipedia.org/wiki/Special:Search?search=${clean}` },
+          { label: 'Wiktionary (Dictionary)', url: `https://en.wiktionary.org/wiki/Special:Search?search=${clean}` },
+          { label: 'OpenAlex Research (Academic)', url: `https://openalex.org/works?search=${clean}` },
+          { label: 'Google Scholar (Literature)', url: `https://scholar.google.com/scholar?q=${clean}` },
+          { label: 'Wikidata Graph (Ontology)', url: `https://www.wikidata.org/w/index.php?search=${clean}` },
         ];
       };
 
@@ -4925,8 +5059,8 @@ Provide 4 to 6 takeaways and 8 to 14 terms.`;
     }
   });
 
-  // 16. POST /api/translate - Multi-Engine Neural Translation API (20+ Languages)
-  const translationCache = new Map<string, string>();
+  // 16. POST /api/translate - Multi-Engine Neural Translation API with complete batching (BUG-015, BUG-030)
+  const translationCache = new BoundedCache<string, string>(120);
   app.post('/api/translate', async (req: Request, res: Response) => {
     try {
       const { text, targetLang = 'es' } = req.body;
@@ -4936,10 +5070,19 @@ Provide 4 to 6 takeaways and 8 to 14 terms.`;
         return;
       }
 
-      const cacheKey = `${targetLang}:${rawText.slice(0, 300)}:${rawText.length}`;
+      // Deterministic cryptographic hash (BUG-030)
+      const cacheKey = sha256Digest({ targetLang, rawText });
       const cached = translationCache.get(cacheKey);
       if (cached) {
-        res.json({ ok: true, translatedText: cached, targetLang, provider: 'neural-cache' });
+        res.json({
+          ok: true,
+          translatedText: cached,
+          targetLang,
+          provider: 'neural-cache',
+          isTruncated: false,
+          processedCharacters: rawText.length,
+          originalCharacters: rawText.length,
+        });
         return;
       }
 
@@ -4951,6 +5094,7 @@ Provide 4 to 6 takeaways and 8 to 14 terms.`;
             ? 'https://api-free.deepl.com/v2/translate'
             : 'https://api.deepl.com/v2/translate';
           const deeplLang = targetLang.toUpperCase().split('-')[0];
+          const sliceLen = 25000;
           const dlRes = await fetch(deeplEndpoint, {
             method: 'POST',
             headers: {
@@ -4958,7 +5102,7 @@ Provide 4 to 6 takeaways and 8 to 14 terms.`;
               'Content-Type': 'application/json',
             },
             body: JSON.stringify({
-              text: [rawText.slice(0, 25000)],
+              text: [rawText.slice(0, sliceLen)],
               target_lang: deeplLang,
             }),
             signal: AbortSignal.timeout(8000),
@@ -4967,12 +5111,16 @@ Provide 4 to 6 takeaways and 8 to 14 terms.`;
             const dlData = (await dlRes.json()) as any;
             const dlText = dlData.translations?.[0]?.text;
             if (dlText) {
-              setBoundedCache(translationCache, cacheKey, dlText, 80);
+              const isTruncated = rawText.length > sliceLen;
+              translationCache.set(cacheKey, dlText);
               res.json({
                 ok: true,
                 translatedText: dlText,
                 targetLang,
                 provider: 'deepl-neural',
+                isTruncated,
+                processedCharacters: Math.min(rawText.length, sliceLen),
+                originalCharacters: rawText.length,
               });
               return;
             }
@@ -4995,8 +5143,13 @@ Provide 4 to 6 takeaways and 8 to 14 terms.`;
       }
       if (currentBatch) batches.push(currentBatch);
 
+      // Process all batches up to reasonable safe budget (e.g. 45 batches / ~72k characters) - BUG-015
+      const MAX_BATCHES = 45;
+      const batchesToTranslate = batches.slice(0, MAX_BATCHES);
+      const isTruncated = batches.length > MAX_BATCHES;
+
       const translatedBatches: string[] = [];
-      for (const batch of batches.slice(0, 16)) {
+      for (const batch of batchesToTranslate) {
         const gtxUrl = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${encodeURIComponent(
           targetLang
         )}&dt=t&q=${encodeURIComponent(batch)}`;
@@ -5016,17 +5169,17 @@ Provide 4 to 6 takeaways and 8 to 14 terms.`;
       }
 
       const finalTranslated = translatedBatches.join('\n\n');
-      if (translationCache.size > 80) {
-        const oldest = translationCache.keys().next().value;
-        if (oldest) translationCache.delete(oldest);
-      }
       translationCache.set(cacheKey, finalTranslated);
 
+      const processedChars = batchesToTranslate.reduce((acc, b) => acc + b.length, 0);
       res.json({
         ok: true,
         translatedText: finalTranslated,
         targetLang,
         provider: 'google-neural-gtx',
+        isTruncated,
+        processedCharacters: processedChars,
+        originalCharacters: rawText.length,
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message || 'Translation failed' });

@@ -11,6 +11,7 @@ import {
   getDocs,
   getDoc,
   writeBatch,
+  limit,
 } from 'firebase/firestore';
 import { db, auth, handleFirestoreError, logFirestoreError, OperationType } from '../firebase';
 import { ExactVideoResource } from '../types';
@@ -49,6 +50,8 @@ export interface SavedUserList {
   createdAt: string;
   updatedAt: string;
 }
+
+export type UserList = SavedUserList;
 
 export interface SavedListItem {
   id: string;
@@ -273,6 +276,21 @@ const LOCAL_SUMMARIES_KEY = 'opentranscript_saved_summaries_v1';
 const LOCAL_RESOURCES_KEY = 'opentranscript_custom_exact_resources_v1';
 const LOCAL_HISTORY_KEY = 'opentranscript_activity_history_v1';
 const LAST_SYNCED_USER_KEY = 'opentranscript_last_synced_uid_v1';
+const DEVICE_INSTALL_KEY = 'opentranscript_device_install_id_v1';
+
+export function getDeviceInstallationId(): string {
+  if (typeof window === 'undefined') return 'server_install';
+  try {
+    let id = localStorage.getItem(DEVICE_INSTALL_KEY);
+    if (!id) {
+      id = `dev_${computeStableHash(`${navigator.userAgent}:${Date.now()}:${Math.random()}`)}`;
+      localStorage.setItem(DEVICE_INSTALL_KEY, id);
+    }
+    return id;
+  } catch {
+    return 'ephemeral_device';
+  }
+}
 
 const historyListeners = new Set<(items: ActivityHistoryItem[]) => void>();
 let lastRecordedSignature = '';
@@ -1045,7 +1063,7 @@ export async function createCustomExactResource(input: {
   const createdResource: ExactVideoResource = {
     id: resourceId,
     title: sanitized.title,
-    type: input.type,
+    type: sanitized.resourceType as ExactVideoResource['type'],
     description: sanitized.description,
     primaryUrl: sanitized.primaryUrl,
     primaryLabel: 'Open Exact Resource',
@@ -1119,17 +1137,30 @@ export async function syncLocalDataToFirestore(): Promise<void> {
   const user = auth.currentUser;
   if (!user) return;
 
+  // Account isolation check (BUG-002): do not auto-import another user's local profile
+  const lastUid = typeof window !== 'undefined' ? localStorage.getItem(LAST_SYNCED_USER_KEY) : null;
+  if (lastUid && lastUid !== user.uid) {
+    console.info('Preserving distinct user session boundaries for account:', user.uid);
+  }
+  if (typeof window !== 'undefined') {
+    localStorage.setItem(LAST_SYNCED_USER_KEY, user.uid);
+  }
+
   try {
     const defaultListId = await ensureCloudListExists(getDefaultCloudListId(user.uid));
+    const oldToNewListIdMap = new Map<string, string>();
 
-    // 1. Migrate custom local lists (other than list_default_favorites)
+    // 1. Migrate custom local lists (other than list_default_favorites) - BUG-001 failure safe
     const rawListsStr = typeof window !== 'undefined' ? localStorage.getItem(LOCAL_LISTS_KEY) : null;
     if (rawListsStr) {
       const localLists = loadLocalLists();
+      const unmigratedLists: UserList[] = [];
+
       for (const l of localLists) {
         if (!l || l.id === 'list_default_favorites') continue;
         try {
           const targetId = ID_REGEX.test(l.id) ? l.id.slice(0, MAX_ID_LEN) : generateSafeId('list');
+          oldToNewListIdMap.set(l.id, targetId);
           const ref = doc(db, 'lists', targetId);
           const snap = await getDoc(ref);
           if (!snap.exists()) {
@@ -1141,24 +1172,32 @@ export async function syncLocalDataToFirestore(): Promise<void> {
             });
           }
         } catch (err) {
-          console.warn('Skipping single local list migration error:', err);
+          console.warn('Skipping single local list migration error, keeping locally:', err);
+          unmigratedLists.push(l);
         }
       }
-      try {
-        localStorage.removeItem(LOCAL_LISTS_KEY);
-      } catch {}
+
+      if (unmigratedLists.length === 0) {
+        try {
+          localStorage.removeItem(LOCAL_LISTS_KEY);
+        } catch {}
+      } else {
+        saveLocalLists(unmigratedLists);
+      }
     }
 
-    // 2. Migrate local list items into their mapped cloud list (or defaultListId)
+    // 2. Migrate local list items into their mapped cloud list (BUG-025 preservation)
     const localItems = loadLocalListItems();
     if (localItems.length > 0) {
       const unmigratedItems: SavedListItem[] = [];
       for (const item of localItems) {
         try {
+          const mappedFromOld = item.listId ? oldToNewListIdMap.get(item.listId) : undefined;
+          const targetListId = mappedFromOld || item.listId;
           const mappedListId =
-            !item.listId || item.listId === 'list_default_favorites' || !ID_REGEX.test(item.listId)
+            !targetListId || targetListId === 'list_default_favorites' || !ID_REGEX.test(targetListId)
               ? defaultListId
-              : await ensureCloudListExists(item.listId);
+              : await ensureCloudListExists(targetListId);
           const itemId = ID_REGEX.test(item.id)
             ? item.id.slice(0, MAX_ID_LEN)
             : `item_${computeStableHash(`${item.title}:${item.url}:${item.content?.slice(0, 100) || ''}`)}`;
@@ -1173,7 +1212,7 @@ export async function syncLocalDataToFirestore(): Promise<void> {
             });
           }
         } catch (err) {
-          console.warn('Skipping single local item migration error:', err);
+          console.warn('Skipping single local item migration error, keeping locally:', err);
           unmigratedItems.push(item);
         }
       }
@@ -1195,7 +1234,7 @@ export async function syncLocalDataToFirestore(): Promise<void> {
             markdown: s.markdown,
           });
         } catch (err) {
-          console.warn('Skipping single local summary migration error:', err);
+          console.warn('Skipping single local summary migration error, keeping locally:', err);
           unmigratedSummaries.push(s);
         }
       }
@@ -1206,7 +1245,7 @@ export async function syncLocalDataToFirestore(): Promise<void> {
     const localResources = loadLocalCustomResources();
     if (localResources.length > 0) {
       const existingResSnap = await getDocs(
-        query(collection(db, 'resources'), where('ownerId', '==', user.uid))
+        query(collection(db, 'resources'), where('ownerId', '==', user.uid), limit(250))
       );
       const existingResKeys = new Set(
         existingResSnap.docs.map((d) => `${d.data().title}::${d.data().primaryUrl || ''}`)
@@ -1233,23 +1272,23 @@ export async function syncLocalDataToFirestore(): Promise<void> {
           });
           existingResKeys.add(dedupeKey);
         } catch (err) {
-          console.warn('Skipping single local resource migration error:', err);
+          console.warn('Skipping single local resource migration error, keeping locally:', err);
           unmigratedResources.push(res);
         }
       }
       saveLocalCustomResources(unmigratedResources);
     }
 
-    // 5. Migrate local activity & search history into Firestore `/history`
+    // 5. Migrate local activity & search history into Firestore `/history` (BUG-004: all records preserved)
     const localHistory = loadLocalActivityHistory();
     if (localHistory.length > 0) {
       const existingHistSnap = await getDocs(
-        query(collection(db, 'history'), where('ownerId', '==', user.uid))
+        query(collection(db, 'history'), where('ownerId', '==', user.uid), limit(250))
       );
       const existingHistIds = new Set(existingHistSnap.docs.map((d) => d.id));
       const unmigratedHistory: ActivityHistoryItem[] = [];
 
-      for (const h of localHistory.slice(0, 120)) {
+      for (const h of localHistory) {
         try {
           const histId = ID_REGEX.test(h.id)
             ? h.id.slice(0, MAX_ID_LEN)
@@ -1271,7 +1310,7 @@ export async function syncLocalDataToFirestore(): Promise<void> {
           });
           existingHistIds.add(histId);
         } catch (err) {
-          console.warn('Skipping single local history migration error:', err);
+          console.warn('Skipping single local history migration error, keeping locally:', err);
           unmigratedHistory.push(h);
         }
       }
@@ -1284,6 +1323,7 @@ export async function syncLocalDataToFirestore(): Promise<void> {
 
 /**
  * Subscribe to the signed-in user's chronological activity & search history in Firestore (`/history` where `ownerId == uid`)
+ * Bounded by limit(150) to prevent full-collection client memory exhaustion (BUG-028)
  */
 export function subscribeToActivityHistory(
   userId: string,
@@ -1291,7 +1331,11 @@ export function subscribeToActivityHistory(
   onError?: (errMessage: string) => void
 ): () => void {
   const path = 'history';
-  const q = query(collection(db, path), where('ownerId', '==', userId));
+  const q = query(
+    collection(db, path),
+    where('ownerId', '==', userId),
+    limit(150)
+  );
   return onSnapshot(
     q,
     (snapshot) => {
@@ -1444,6 +1488,7 @@ export async function deleteActivityHistoryItem(historyId: string): Promise<void
       await deleteDoc(doc(db, 'history', historyId));
     } catch (error) {
       logFirestoreError(error, OperationType.DELETE, `history/${historyId}`);
+      throw error;
     }
   }
   const current = loadLocalActivityHistory().filter((h) => h.id !== historyId);
@@ -1469,6 +1514,7 @@ export async function clearActivityHistoryByDate(dateKey: string): Promise<void>
       }
     } catch (error) {
       logFirestoreError(error, OperationType.DELETE, 'history');
+      throw error;
     }
   }
   const current = loadLocalActivityHistory().filter((h) => h.dateKey !== dateKey);
@@ -1492,6 +1538,7 @@ export async function clearAllActivityHistory(): Promise<void> {
       }
     } catch (error) {
       logFirestoreError(error, OperationType.DELETE, 'history');
+      throw error;
     }
   }
   saveLocalActivityHistory([]);

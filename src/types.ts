@@ -15,6 +15,7 @@ export type MediaSourceType =
   | 'ted'
   | 'loom'
   | 'podcast_rss'
+  | 'podcast_description'
   | 'direct_audio'
   | 'direct_video'
   | 'direct_subtitle'

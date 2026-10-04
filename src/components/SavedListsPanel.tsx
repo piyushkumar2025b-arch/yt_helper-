@@ -48,6 +48,12 @@ import { APP_THEMES } from '../constants';
 import { ThemeId, VideoMetadata, TranscriptSegment, ExactVideoResource } from '../types';
 import { speechService } from '../services/speechService';
 
+// URL Safety check (BUG-040)
+function isSafeHttpUrl(url?: string): boolean {
+  if (!url) return false;
+  return /^https?:\/\//i.test(url.trim());
+}
+
 interface SavedListsPanelProps {
   currentTheme: ThemeId;
   currentVideoMetadata: VideoMetadata | null;
