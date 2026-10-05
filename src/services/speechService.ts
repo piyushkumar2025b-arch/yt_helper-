@@ -1005,7 +1005,9 @@ class SpeechService {
    * aligns every UI word token to its exact millisecond interval, and prepares a playable Blob URL.
    */
   private prepareCloudAudio(text: string, voiceURI: string, lang: string): Promise<PreparedCloudAudio | null> {
-    const cacheKey = `${voiceURI}:${lang}:${text.slice(0, 350)}:${text.length}`;
+    const rate = this.rate || 1.0;
+    const pitch = this.pitch || 1.0;
+    const cacheKey = `${voiceURI}:${lang}:${rate.toFixed(2)}:${pitch.toFixed(2)}:${text.slice(0, 350)}:${text.length}`;
     if (this.preparedAudioCache.has(cacheKey)) {
       return this.preparedAudioCache.get(cacheKey)!;
     }
@@ -1019,7 +1021,8 @@ class SpeechService {
             text,
             voiceName: voiceURI,
             lang,
-            speakingRate: 1.0,
+            speakingRate: rate,
+            pitch,
           }),
         });
         if (!res.ok) {

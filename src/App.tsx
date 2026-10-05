@@ -9,6 +9,7 @@ import { AskVideoAI } from './components/AskVideoAI';
 import { OpenRouterSettingsModal } from './components/OpenRouterSettingsModal';
 import { ManualTranscriptModal } from './components/ManualTranscriptModal';
 import { VoiceSettingsModal } from './components/VoiceSettingsModal';
+import { YouTubeSettingsModal } from './components/YouTubeSettingsModal';
 import { AudioNarrationBar } from './components/AudioNarrationBar';
 import { ResearchVisualsPanel } from './components/ResearchVisualsPanel';
 import { TypographySettingsModal, DEFAULT_TYPOGRAPHY } from './components/TypographySettingsModal';
@@ -251,6 +252,11 @@ export default function App() {
 
   // Modals & Audio state
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
+  const [isYouTubeModalOpen, setIsYouTubeModalOpen] = useState<boolean>(false);
+  const [hasYouTubeKey, setHasYouTubeKey] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return Boolean(localStorage.getItem('youtube_api_key') || localStorage.getItem('youtube_cookies'));
+  });
   const [isManualModalOpen, setIsManualModalOpen] = useState<boolean>(false);
   const [isVoiceSettingsOpen, setIsVoiceSettingsOpen] = useState<boolean>(false);
 
@@ -514,9 +520,15 @@ export default function App() {
     setCurrentUrl(urlToFetch);
 
     try {
+      const headers: Record<string, string> = {};
+      const storedYtKey = typeof window !== 'undefined' ? localStorage.getItem('youtube_api_key') : null;
+      if (storedYtKey) headers['x-youtube-api-key'] = storedYtKey;
+      const storedYtCookies = typeof window !== 'undefined' ? localStorage.getItem('youtube_cookies') : null;
+      if (storedYtCookies) headers['x-youtube-cookies'] = storedYtCookies;
+
       const transcriptRes = await fetchWithRetry(
         `/api/transcript?url=${encodeURIComponent(urlToFetch)}`,
-        { signal: controller.signal },
+        { signal: controller.signal, headers },
         2
       );
       const transcriptData = await transcriptRes.json().catch(() => ({}));
@@ -554,7 +566,10 @@ export default function App() {
         return;
       }
 
-      setMetadata(transcriptData.metadata);
+      setMetadata({
+        ...transcriptData.metadata,
+        sourceKind: 'live_transcript',
+      });
       setSegments(transcriptData.segments || []);
       setFullText(transcriptData.fullText || '');
       setIsLoading(false);
@@ -608,6 +623,8 @@ export default function App() {
           totalWords: savedMarkdown.split(/\s+/).filter(Boolean).length,
           estimatedTokens: Math.round(savedMarkdown.split(/\s+/).filter(Boolean).length * 1.33),
           durationFormatted: '00:00',
+          sourceType: 'direct_text',
+          sourceKind: 'saved_summary_only',
         });
         setSummary({
           markdown: savedMarkdown,
@@ -1176,6 +1193,8 @@ export default function App() {
           onSignIn={handleSignInWithGoogle}
           onSignOut={handleSignOut}
           onQuickSaveToCloud={handleQuickSaveCurrentVideo}
+          onOpenYouTubeSettings={() => setIsYouTubeModalOpen(true)}
+          hasYouTubeKey={hasYouTubeKey}
         />
       )}
 
@@ -1283,6 +1302,12 @@ export default function App() {
                   className="underline font-semibold cursor-pointer"
                 >
                   Paste text manually
+                </button>
+                <button
+                  onClick={() => setIsYouTubeModalOpen(true)}
+                  className="px-2 py-0.5 rounded bg-red-600/20 text-red-300 hover:bg-red-600/30 border border-red-500/30 font-semibold cursor-pointer"
+                >
+                  YouTube Key / Cookies
                 </button>
                 <button
                   onClick={() => setErrorMessage(null)}
@@ -1572,6 +1597,13 @@ export default function App() {
         onSelectDetailLevel={setDetailLevel}
         provider={provider}
         onSelectProvider={handleSelectProvider}
+      />
+
+      <YouTubeSettingsModal
+        isOpen={isYouTubeModalOpen}
+        onClose={() => setIsYouTubeModalOpen(false)}
+        currentTheme={theme}
+        onSaved={(key, cookies) => setHasYouTubeKey(Boolean(key || cookies))}
       />
 
       <ManualTranscriptModal

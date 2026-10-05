@@ -39,6 +39,7 @@ export interface VideoMetadata {
   url: string;
   title: string;
   sourceType?: MediaSourceType;
+  sourceKind?: 'live_transcript' | 'saved_summary_only';
   mediaUrl?: string;
   embedUrl?: string;
   authorName?: string;

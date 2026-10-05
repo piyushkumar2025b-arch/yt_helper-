@@ -54,8 +54,8 @@ const __dirname = path.dirname(__filename);
 async function startServer() {
   const app = express();
   const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
-  // Read Google API keys strictly from environment variables (C-01)
-  const GOOGLE_API_KEY = (process.env.GOOGLE_API_KEY || '').trim();
+  // Read Google and YouTube API keys strictly from environment variables or client headers (C-01)
+  const GOOGLE_API_KEY = (process.env.GOOGLE_API_KEY || process.env.YOUTUBE_API_KEY || '').trim();
   const GOOGLE_CSE_ID = (process.env.GOOGLE_CSE_ID || '').trim();
 
   app.use(express.json({ limit: '15mb' }));
@@ -271,10 +271,11 @@ async function startServer() {
   });
 
   // Helper to fetch YouTube metadata via YouTube Data API v3 with oEmbed fallback
-  async function fetchVideoOEmbed(videoId: string) {
-    if (GOOGLE_API_KEY) {
+  async function fetchVideoOEmbed(videoId: string, apiKeyOverride?: string) {
+    const activeKey = (apiKeyOverride || GOOGLE_API_KEY || (process.env.YOUTUBE_API_KEY || '')).trim();
+    if (activeKey) {
       try {
-        const ytApiUrl = `https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails,statistics&id=${encodeURIComponent(videoId)}&key=${GOOGLE_API_KEY}`;
+        const ytApiUrl = `https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails,statistics&id=${encodeURIComponent(videoId)}&key=${activeKey}`;
         const ytRes = await fetch(ytApiUrl, { signal: AbortSignal.timeout(4500) });
         if (ytRes.ok) {
           const ytData = (await ytRes.json()) as YouTubeVideoListResponse;
@@ -342,6 +343,18 @@ async function startServer() {
           ''
       ).trim();
       const customTitle = String(req.body?.title || req.query.title || '').trim();
+      const clientYoutubeKey = String(
+        req.headers['x-youtube-api-key'] ||
+          req.body?.youtubeApiKey ||
+          req.query?.youtubeApiKey ||
+          ''
+      ).trim();
+      const clientCookies = String(
+        req.headers['x-youtube-cookies'] ||
+          req.body?.cookies ||
+          req.query?.cookies ||
+          ''
+      ).trim();
 
       if (!rawInput) {
         res.status(400).json({ error: 'Please provide a YouTube video URL, video ID, subtitle URL, or transcript text.' });
@@ -488,17 +501,19 @@ async function startServer() {
       }
 
       // Branch B: Valid YouTube Video ID
-      const oembed = await fetchVideoOEmbed(videoId);
+      const oembed = await fetchVideoOEmbed(videoId, clientYoutubeKey);
 
       // 1. Instant check for curated sample transcripts
       let segments: ParsedSegment[] | null = SAMPLE_FALLBACK_TRANSCRIPTS[videoId] || null;
 
-      // 2. Multi-method extraction (Direct YouTube, Innertube, Piped, Invidious, Gemini Native Video & Search Grounding)
+      // 2. Multi-method extraction (youtube-transcript, yt-dlp, Direct YouTube, Innertube, Piped, Invidious, Description Chapters, Gemini Native Video & Search Grounding)
       if (!segments || segments.length === 0) {
         segments = await fetchPipedTranscript(videoId, {
           title: oembed.title,
           authorName: oembed.authorName,
           description: oembed.description,
+          youtubeApiKey: clientYoutubeKey,
+          cookies: clientCookies,
         });
       }
 
@@ -507,7 +522,8 @@ async function startServer() {
         res.status(404).json({
           ok: false,
           error:
-            'No captions or transcript tracks were found for this video. Please paste a transcript manually using "Paste Text" to analyze it.',
+            'YouTube captions could not be automatically extracted for this video (bot verification required by YouTube). Use "Paste Text", "Upload Audio/Video", or provide your YouTube API Key / cookies in Settings.',
+          requiresManualOrKey: true,
           metadata: {
             videoId,
             url: `https://www.youtube.com/watch?v=${videoId}`,
@@ -1759,9 +1775,9 @@ ${transcript.slice(0, 120000)}
   // 4. GET /api/youtube-search - Search YouTube videos via YouTube Data API v3 with infinite pagination
   app.get('/api/youtube-search', async (req: Request, res: Response) => {
     try {
-      const q = ((req.query.q as string) || '').trim();
-      const pageToken = ((req.query.pageToken as string) || '').trim();
-      const page = Math.max(0, parseInt((req.query.page as string) || '0', 10) || 0);
+      const q = ((req.query.q as string) || '').trim().slice(0, 300);
+      const pageToken = ((req.query.pageToken as string) || '').trim().slice(0, 100);
+      const page = Math.min(50, Math.max(0, parseInt((req.query.page as string) || '0', 10) || 0));
 
       if (!q) {
         res.status(400).json({ error: 'Search query parameter (q) is required.' });
@@ -1877,8 +1893,8 @@ ${transcript.slice(0, 120000)}
   // 5. GET /api/books-search - Google Books API v1 + OpenLibrary infinite pagination
   app.get('/api/books-search', async (req: Request, res: Response) => {
     try {
-      const q = ((req.query.q as string) || '').trim();
-      const page = Math.max(0, parseInt((req.query.page as string) || '0', 10) || 0);
+      const q = ((req.query.q as string) || '').trim().slice(0, 300);
+      const page = Math.min(50, Math.max(0, parseInt((req.query.page as string) || '0', 10) || 0));
       const maxResults = 20;
       const startIndex = page * maxResults;
 
@@ -2061,8 +2077,8 @@ ${transcript.slice(0, 120000)}
   // 6. GET /api/web-search - Google Custom Search API + Wikipedia + DuckDuckGo with infinite pagination
   app.get('/api/web-search', async (req: Request, res: Response) => {
     try {
-      const q = (req.query.q as string || '').trim();
-      const page = Math.max(0, parseInt((req.query.page as string) || '0', 10) || 0);
+      const q = (req.query.q as string || '').trim().slice(0, 300);
+      const page = Math.min(50, Math.max(0, parseInt((req.query.page as string) || '0', 10) || 0));
 
       if (!q) {
         res.status(400).json({ error: 'Search query parameter (q) is required.' });
@@ -2290,8 +2306,8 @@ ${transcript.slice(0, 120000)}
   // 7. GET /api/image-search - Google Custom Search Images + Wikimedia Commons + Wikipedia with infinite pagination
   app.get('/api/image-search', async (req: Request, res: Response) => {
     try {
-      const q = (req.query.q as string || '').trim();
-      const page = Math.max(0, parseInt((req.query.page as string) || '0', 10) || 0);
+      const q = (req.query.q as string || '').trim().slice(0, 300);
+      const page = Math.min(50, Math.max(0, parseInt((req.query.page as string) || '0', 10) || 0));
 
       if (!q) {
         res.status(400).json({ error: 'Search query parameter (q) is required.' });
@@ -2650,8 +2666,8 @@ ${transcript.slice(0, 120000)}
   // 8. GET /api/news-search - News, media coverage, and community discussions with infinite pagination
   app.get('/api/news-search', async (req: Request, res: Response) => {
     try {
-      const q = (req.query.q as string || '').trim();
-      const page = Math.max(0, parseInt((req.query.page as string) || '0', 10) || 0);
+      const q = (req.query.q as string || '').trim().slice(0, 300);
+      const page = Math.min(50, Math.max(0, parseInt((req.query.page as string) || '0', 10) || 0));
 
       if (!q) {
         res.status(400).json({ error: 'Search query parameter (q) is required.' });
@@ -2881,8 +2897,8 @@ ${transcript.slice(0, 120000)}
   // 9. GET /api/academic-search - Peer-Reviewed Research Papers (OpenAlex + Semantic Scholar + arXiv + Crossref + PubMed) with infinite pagination
   app.get('/api/academic-search', async (req: Request, res: Response) => {
     try {
-      const q = ((req.query.q as string) || '').trim();
-      const page = Math.max(0, parseInt((req.query.page as string) || '0', 10) || 0);
+      const q = ((req.query.q as string) || '').trim().slice(0, 300);
+      const page = Math.min(50, Math.max(0, parseInt((req.query.page as string) || '0', 10) || 0));
 
       if (!q) {
         res.status(400).json({ error: 'Search query parameter (q) is required.' });
@@ -3590,7 +3606,7 @@ ${transcript.slice(0, 120000)}
             });
             const response = await ai.models.generateContent({
               model: ttsModel,
-              contents: [{ parts: [{ text: cleanText.slice(0, 1200) }] }],
+              contents: [{ parts: [{ text: cleanText }] }],
               config: {
                 responseModalities: ['AUDIO'],
                 speechConfig: {
@@ -3775,8 +3791,8 @@ ${transcript.slice(0, 120000)}
   // 12. GET /api/github-search - Open-Source Code, AI Models, Datasets & Packages (GitHub + HuggingFace + npm)
   app.get('/api/github-search', async (req: Request, res: Response) => {
     try {
-      const q = ((req.query.q as string) || '').trim();
-      const page = Math.max(0, parseInt((req.query.page as string) || '0', 10) || 0);
+      const q = ((req.query.q as string) || '').trim().slice(0, 300);
+      const page = Math.min(50, Math.max(0, parseInt((req.query.page as string) || '0', 10) || 0));
       if (!q) {
         res.status(400).json({ error: 'Query parameter (q) is required.' });
         return;
@@ -3995,8 +4011,8 @@ ${transcript.slice(0, 120000)}
   // 13. GET /api/community-search - Technical Q&A & Developer/Research Discussions (StackOverflow + Reddit + DEV.to + HN)
   app.get('/api/community-search', async (req: Request, res: Response) => {
     try {
-      const q = ((req.query.q as string) || '').trim();
-      const page = Math.max(0, parseInt((req.query.page as string) || '0', 10) || 0);
+      const q = ((req.query.q as string) || '').trim().slice(0, 300);
+      const page = Math.min(50, Math.max(0, parseInt((req.query.page as string) || '0', 10) || 0));
       if (!q) {
         res.status(400).json({ error: 'Query parameter (q) is required.' });
         return;
@@ -4226,8 +4242,8 @@ ${transcript.slice(0, 120000)}
   // 14. GET /api/podcasts-datasets - Audio Podcasts, Open Science Datasets & Archival Media (Apple Podcasts + Zenodo + Internet Archive)
   app.get('/api/podcasts-datasets', async (req: Request, res: Response) => {
     try {
-      const q = ((req.query.q as string) || '').trim();
-      const page = Math.max(0, parseInt((req.query.page as string) || '0', 10) || 0);
+      const q = ((req.query.q as string) || '').trim().slice(0, 300);
+      const page = Math.min(50, Math.max(0, parseInt((req.query.page as string) || '0', 10) || 0));
       if (!q) {
         res.status(400).json({ error: 'Query parameter (q) is required.' });
         return;

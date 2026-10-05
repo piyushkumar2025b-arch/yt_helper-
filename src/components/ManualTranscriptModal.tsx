@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { X, Upload, FileText, Check, Link2, Loader2, Music, Radio } from 'lucide-react';
 import { parseAnyTranscriptFormat, formatTime } from '../utils/subtitleParser';
 import { TranscriptSegment, VideoMetadata } from '../types';
@@ -62,12 +62,37 @@ export const ManualTranscriptModal: React.FC<ManualTranscriptModalProps> = ({
   const [isTranscribingAudio, setIsTranscribingAudio] = useState(false);
   const [modalError, setModalError] = useState<string | null>(null);
 
+  const fileReaderRef = useRef<FileReader | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    return () => {
+      fileReaderRef.current?.abort();
+      abortControllerRef.current?.abort();
+    };
+  }, []);
+
+  const handleClose = () => {
+    fileReaderRef.current?.abort();
+    abortControllerRef.current?.abort();
+    onClose();
+  };
+
   if (!isOpen) return null;
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     setModalError(null);
+
+    // Early file-size validation (BUG-051)
+    const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
+    if (file.size > MAX_UPLOAD_BYTES) {
+      setModalError(
+        `File is too large (${(file.size / (1024 * 1024)).toFixed(1)} MB). Maximum allowed size is 25 MB.`
+      );
+      return;
+    }
 
     const baseTitle = file.name.replace(/\.[^/.]+$/, '');
     if (!titleInput) {
@@ -82,6 +107,10 @@ export const ManualTranscriptModal: React.FC<ManualTranscriptModalProps> = ({
     if (isAudioOrVideo) {
       setIsTranscribingAudio(true);
       const reader = new FileReader();
+      fileReaderRef.current = reader;
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
+
       reader.onload = async (event) => {
         try {
           const dataUrl = event.target?.result as string;
@@ -97,6 +126,7 @@ export const ManualTranscriptModal: React.FC<ManualTranscriptModalProps> = ({
               mimeType,
               filename: file.name,
             }),
+            signal: controller.signal,
           });
           const data = await res.json();
           if (!res.ok || !data.segments?.length) {
@@ -114,8 +144,9 @@ export const ManualTranscriptModal: React.FC<ManualTranscriptModalProps> = ({
               durationSeconds: data.metadata?.durationSeconds,
             }
           );
-          onClose();
+          handleClose();
         } catch (err: any) {
+          if (err.name === 'AbortError') return;
           setModalError(err.message || 'Audio transcription failed. You can paste the text transcript below.');
         } finally {
           setIsTranscribingAudio(false);
@@ -127,6 +158,7 @@ export const ManualTranscriptModal: React.FC<ManualTranscriptModalProps> = ({
 
     // Text / Subtitle files
     const reader = new FileReader();
+    fileReaderRef.current = reader;
     reader.onload = (event) => {
       const text = event.target?.result as string;
       if (text) {
@@ -196,7 +228,7 @@ export const ManualTranscriptModal: React.FC<ManualTranscriptModalProps> = ({
       titleInput.trim() || 'Custom Document / Uploaded Transcript',
       segments.length > 0 ? segments : undefined
     );
-    onClose();
+    handleClose();
   };
 
   return (
@@ -216,7 +248,7 @@ export const ManualTranscriptModal: React.FC<ManualTranscriptModalProps> = ({
             </div>
           </div>
           <button
-            onClick={onClose}
+            onClick={handleClose}
             className="p-1 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors cursor-pointer"
           >
             <X className="w-4 h-4" />

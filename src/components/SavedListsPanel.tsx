@@ -211,19 +211,21 @@ export const SavedListsPanel: React.FC<SavedListsPanelProps> = ({
 
   const activeList = lists.find((l) => l.id === selectedListId) || lists[0] || null;
 
-  // Combine list items + cloud summaries + custom exact resources when viewing "all_artifacts"
+  // Combine list items + cloud summaries + custom exact resources when viewing "all_artifacts" (BUG-038)
   const unifiedArtifacts = useMemo<SavedListItem[]>(() => {
     if (selectedFolderView !== 'all_artifacts') {
       return items;
     }
 
     const combined: SavedListItem[] = [...items];
-    const seenTitles = new Set(combined.map((i) => i.title.toLowerCase().trim()));
+    const seenKeys = new Set(
+      combined.map((i) => (i.url ? `url:${i.url.toLowerCase().trim()}` : `id:${i.id}`))
+    );
 
     for (const res of customResources) {
-      const key = res.title.toLowerCase().trim();
-      if (!seenTitles.has(key)) {
-        seenTitles.add(key);
+      const key = res.primaryUrl ? `url:${res.primaryUrl.toLowerCase().trim()}` : `id:${res.id}`;
+      if (!seenKeys.has(key)) {
+        seenKeys.add(key);
         combined.push({
           id: res.id,
           listId: activeList?.id || 'list_default_favorites',
@@ -243,9 +245,9 @@ export const SavedListsPanel: React.FC<SavedListsPanelProps> = ({
     }
 
     for (const sum of savedSummaries) {
-      const key = sum.videoTitle.toLowerCase().trim();
-      if (!seenTitles.has(key)) {
-        seenTitles.add(key);
+      const key = sum.videoUrl ? `url:${sum.videoUrl.toLowerCase().trim()}` : `id:${sum.id}`;
+      if (!seenKeys.has(key)) {
+        seenKeys.add(key);
         combined.push({
           id: sum.id,
           listId: activeList?.id || 'list_default_favorites',
@@ -345,10 +347,14 @@ export const SavedListsPanel: React.FC<SavedListsPanelProps> = ({
   const handleSaveAllVideoSourcesToArtifacts = async () => {
     if (!activeList || currentVideoExactResources.length === 0) return;
     try {
-      const existingTitles = new Set(unifiedArtifacts.map((a) => a.title.toLowerCase().trim()));
+      const existingKeys = new Set(
+        unifiedArtifacts.map((a) => (a.url ? a.url.toLowerCase().trim() : a.id))
+      );
       let addedCount = 0;
       for (const r of currentVideoExactResources) {
-        if (!existingTitles.has(r.title.toLowerCase().trim())) {
+        const rKey = r.primaryUrl ? r.primaryUrl.toLowerCase().trim() : r.id;
+        if (!existingKeys.has(rKey)) {
+          existingKeys.add(rKey);
           await addItemToUserList(activeList.id, {
             itemType: r.type === 'Book / Publication' ? 'book' : 'article',
             title: r.title,
@@ -999,7 +1005,7 @@ export const SavedListsPanel: React.FC<SavedListsPanelProps> = ({
                     </div>
 
                     <h4 className={`text-sm sm:text-base font-bold ${themeConfig.textPrimary}`}>
-                      {item.url ? (
+                      {isSafeHttpUrl(item.url) ? (
                         <a
                           href={item.url}
                           target="_blank"
@@ -1017,7 +1023,7 @@ export const SavedListsPanel: React.FC<SavedListsPanelProps> = ({
 
                   {/* Artifact Actions */}
                   <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
-                    {item.url && !isYouTubeItem && (
+                    {isSafeHttpUrl(item.url) && !isYouTubeItem && (
                       <a
                         href={item.url}
                         target="_blank"

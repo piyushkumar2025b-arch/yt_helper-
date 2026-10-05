@@ -975,6 +975,11 @@ export const SummaryViewer: React.FC<SummaryViewerProps> = ({
             <h1 className={`text-sm sm:text-base font-bold tracking-tight truncate ${themeConfig.textPrimary}`}>
               {videoTitle || 'Video Summary'}
             </h1>
+            {videoMetadata?.sourceKind === 'saved_summary_only' && (
+              <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/30 shrink-0" title="This summary was loaded from saved artifacts without an active video transcript connection">
+                Archived Summary Only
+              </span>
+            )}
             <span className={`hidden xl:inline text-[10px] ${themeConfig.textMuted} tabular-nums shrink-0`}>
               ({formalMarkdown.split(/\s+/).filter(Boolean).length.toLocaleString()}w · ~{Math.max(1, Math.round((formalMarkdown.split(/\s+/).length || 200) / 220))}m)
             </span>

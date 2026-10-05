@@ -248,6 +248,7 @@ export const ResearchVisualsPanel: React.FC<ResearchVisualsPanelProps> = ({
   const loadMoreSentinelRef = useRef<HTMLDivElement | null>(null);
   const isFetchingRef = useRef<boolean>(false);
   const searchAbortRef = useRef<AbortController | null>(null);
+  const consecutiveZeroAddsRef = useRef<number>(0);
 
   useEffect(() => {
     return () => {
@@ -290,6 +291,7 @@ export const ResearchVisualsPanel: React.FC<ResearchVisualsPanelProps> = ({
     setYtNextPageToken(null);
     setHasMore(true);
     setBrokenImageIds(new Set());
+    consecutiveZeroAddsRef.current = 0;
 
     try {
       const safeFetchJson = async (url: string) => {
@@ -498,7 +500,13 @@ export const ResearchVisualsPanel: React.FC<ResearchVisualsPanelProps> = ({
         (booksData.books?.length || 0) > 0 ||
         (ytData.videos?.length || 0) > 0;
 
-      if (!anySourceReturnedItems && addedCount === 0) {
+      if (addedCount === 0) {
+        consecutiveZeroAddsRef.current += 1;
+      } else {
+        consecutiveZeroAddsRef.current = 0;
+      }
+
+      if ((!anySourceReturnedItems && addedCount === 0) || consecutiveZeroAddsRef.current >= 2) {
         setHasMore(false);
       }
     } catch (e) {

@@ -1,5 +1,7 @@
 import { XMLParser } from 'fast-xml-parser';
 import { GoogleGenAI } from '@google/genai';
+import { YoutubeTranscript } from 'youtube-transcript';
+import { fetchSubtitlesViaYtDlp } from './ytDlpService.ts';
 import {
   ParsedSegment,
   extractVideoId,
@@ -26,6 +28,51 @@ export interface VideoTranscriptContext {
   title?: string;
   authorName?: string;
   description?: string;
+  youtubeApiKey?: string;
+  cookies?: string;
+}
+
+/**
+ * Extracts structured timestamped chapters from video descriptions if present.
+ */
+export function extractChaptersFromDescription(description: string): ParsedSegment[] | null {
+  if (!description || typeof description !== 'string') return null;
+  const lines = description.split('\n');
+  const segments: ParsedSegment[] = [];
+
+  const chapterRegex = /^(?:\[|\()?(\d{1,2}:\d{2}(?::\d{2})?)(?:\]|\))?\s*[-–—:]?\s*(.+)$/i;
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    const match = line.match(chapterRegex);
+    if (match) {
+      const timeStr = match[1];
+      const title = match[2].trim();
+      const seconds = parseTtmlTimeToSeconds(timeStr);
+      if (title.length > 1) {
+        segments.push({
+          start: seconds,
+          duration: 30,
+          text: title,
+          formattedTime: formatTime(seconds),
+        });
+      }
+    }
+  }
+
+  if (segments.length >= 3) {
+    segments.sort((a, b) => a.start - b.start);
+    for (let i = 0; i < segments.length; i++) {
+      if (i < segments.length - 1) {
+        segments[i].duration = Math.max(5, segments[i + 1].start - segments[i].start);
+      } else {
+        segments[i].duration = 60;
+      }
+    }
+    return segments;
+  }
+  return null;
 }
 
 const transcriptCache = new Map<string, ParsedSegment[]>();
@@ -487,6 +534,32 @@ async function fetchFromSingleInvidiousInstance(instance: string, videoId: strin
   throw new Error('Empty Invidious segments');
 }
 
+// Helper to fetch using the youtube-transcript npm package (fastest, Android InnerTube client)
+async function fetchViaYoutubeTranscriptPackage(videoId: string): Promise<ParsedSegment[] | null> {
+  try {
+    const rawList = await Promise.race([
+      YoutubeTranscript.fetchTranscript(videoId),
+      new Promise<null>((_, reject) => setTimeout(() => reject(new Error('Timeout')), 5000)),
+    ]);
+    if (Array.isArray(rawList) && rawList.length > 0) {
+      const mapped: ParsedSegment[] = rawList.map((item: any) => {
+        const startSec = (item.offset || 0) / 1000;
+        const durSec = Math.max(0.5, (item.duration || 1000) / 1000);
+        return {
+          start: Math.round(startSec * 100) / 100,
+          duration: Math.round(durSec * 100) / 100,
+          text: String(item.text || '').replace(/\s+/g, ' ').trim(),
+          formattedTime: formatTime(startSec),
+        };
+      }).filter((s) => s.text.length > 0);
+      if (mapped.length > 0) return mapped;
+    }
+  } catch {
+    // Continue to next method
+  }
+  return null;
+}
+
 // Method 4: Gemini Multimodal Native YouTube Video Transcription (Google server-to-YouTube integration)
 async function fetchGeminiYoutubeTranscript(
   videoId: string,
@@ -507,31 +580,36 @@ async function fetchGeminiYoutubeTranscript(
   const youtubeUrl = `https://www.youtube.com/watch?v=${videoId}`;
   const modelsToTry = ['gemini-3.1-flash-lite', 'gemini-flash-latest', 'gemini-3.8-flash'];
 
-  // Pass 1: Direct YouTube video URI via fileData (native Google YouTube stream access)
+  // Pass 1: Direct YouTube video URI via fileData with strict timeout
   for (const modelName of modelsToTry) {
     try {
-      const response = await ai.models.generateContent({
-        model: modelName,
-        contents: [
-          {
-            fileData: {
-              fileUri: youtubeUrl,
-              mimeType: 'video/mp4',
+      const response = await Promise.race([
+        ai.models.generateContent({
+          model: modelName,
+          contents: [
+            {
+              fileData: {
+                fileUri: youtubeUrl,
+                mimeType: 'video/mp4',
+              },
             },
-          },
-          `Extract a detailed chronological transcript of this YouTube video${
-            context?.title ? ` ("${context.title}")` : ''
-          }.
+            `Extract a detailed chronological transcript of this YouTube video${
+              context?.title ? ` ("${context.title}")` : ''
+            }.
 Format EVERY line strictly with its timestamp in [MM:SS] format followed by the spoken words, like this:
 [00:00] First spoken sentence or phrase here.
 [00:06] Next spoken sentence or phrase here.
 Do not include any intro or outro commentary—output ONLY the [MM:SS] transcript lines covering the video from start to finish.`,
-        ],
-        config: {
-          temperature: 0.1,
-          maxOutputTokens: 8192,
-        },
-      });
+          ],
+          config: {
+            temperature: 0.1,
+            maxOutputTokens: 8192,
+          },
+        }),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Gemini fileData timeout')), 14000)
+        ),
+      ]);
 
       const rawText = response.text || '';
       const parsed = parseSubtitlePayload(rawText, true);
@@ -545,23 +623,29 @@ Do not include any intro or outro commentary—output ONLY the [MM:SS] transcrip
 
   // Pass 2: Search-grounded transcript recovery if video has restricted embed/fileData access
   if (context?.title) {
-    for (const modelName of modelsToTry) {
+    const searchModels = ['gemini-3.8-flash', 'gemini-flash-latest'];
+    for (const modelName of searchModels) {
       try {
-        const response = await ai.models.generateContent({
-          model: modelName,
-          contents: `Find the spoken transcript or detailed chronological speech breakdown for the YouTube video titled "${context.title}"${
-            context.authorName ? ` by ${context.authorName}` : ''
-          } (${youtubeUrl}).
+        const response = await Promise.race([
+          ai.models.generateContent({
+            model: modelName,
+            contents: `Find the spoken transcript or detailed chronological speech breakdown for the YouTube video titled "${context.title}"${
+              context.authorName ? ` by ${context.authorName}` : ''
+            } (${youtubeUrl}).
 ${context.description ? `Video Description / Notes:\n${context.description.slice(0, 2500)}\n` : ''}
 Format EVERY line strictly as:
 [MM:SS] Spoken transcript content or verbatim point from the video.
 Output at least 25 chronological [MM:SS] lines covering the full video from beginning to end. Output ONLY the [MM:SS] lines.`,
-          config: {
-            tools: [{ googleSearch: {} }],
-            temperature: 0.2,
-            maxOutputTokens: 4096,
-          },
-        });
+            config: {
+              tools: [{ googleSearch: {} }],
+              temperature: 0.2,
+              maxOutputTokens: 4096,
+            },
+          }),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('Gemini search grounding timeout')), 12000)
+          ),
+        ]);
 
         const rawText = response.text || '';
         const parsed = parseSubtitlePayload(rawText, false);
@@ -580,8 +664,11 @@ Output at least 25 chronological [MM:SS] lines covering the full video from begi
 /**
  * Multi-method transcript extraction pipeline:
  * 1. In-memory cache & curated sample transcripts
- * 2. Direct YouTube watch page captionTracks + Innertube Player API + Piped/Invidious mirrors (raced in parallel)
- * 3. Gemini native multimodal YouTube video transcription (`fileData` -> `googleSearch` grounding)
+ * 2. youtube-transcript npm package (fastest, InnerTube Android API)
+ * 3. yt-dlp binary with auto-subs & multi-language extraction (uses standalone binary)
+ * 4. Direct YouTube watch page captionTracks + Innertube Player API + Piped/Invidious mirrors (raced in parallel)
+ * 5. Structured chapters/outline extracted from video description
+ * 6. Gemini native multimodal YouTube video transcription (`fileData` -> `googleSearch` grounding)
  */
 export async function fetchPipedTranscript(
   videoId: string,
@@ -598,7 +685,24 @@ export async function fetchPipedTranscript(
     return SAMPLE_FALLBACK_TRANSCRIPTS[videoId];
   }
 
-  // Stage 1: Race all fast caption track extractors in parallel
+  // 1. Try youtube-transcript npm package (fastest, uses InnerTube Android API)
+  const ytPackageSegs = await fetchViaYoutubeTranscriptPackage(videoId);
+  if (ytPackageSegs && ytPackageSegs.length > 0) {
+    cacheTranscript(videoId, ytPackageSegs);
+    return ytPackageSegs;
+  }
+
+  // 2. Try yt-dlp binary (handles auto-subs, multi-language, cookies if provided)
+  const ytDlpSegs = await fetchSubtitlesViaYtDlp(videoId, {
+    cookies: context?.cookies,
+    timeoutMs: 12000,
+  });
+  if (ytDlpSegs && ytDlpSegs.length > 0) {
+    cacheTranscript(videoId, ytDlpSegs);
+    return ytDlpSegs;
+  }
+
+  // 3. Race fast caption track extractors in parallel (direct watch page, innertube, mirrors)
   try {
     const fastTasks: Array<Promise<ParsedSegment[]>> = [
       fetchDirectYouTubeCaptions(videoId).then((r) => {
@@ -619,10 +723,19 @@ export async function fetchPipedTranscript(
       return fastSegments;
     }
   } catch {
-    // All fast caption scrapers failed or were blocked by YouTube datacenter IP rules; proceed to Stage 2
+    // Proceed to next fallback
   }
 
-  // Stage 2: Native Google Gemini Multimodal YouTube Transcription
+  // 4. Check video description for structured chapters / timestamped outline
+  if (context?.description) {
+    const chapterSegments = extractChaptersFromDescription(context.description);
+    if (chapterSegments && chapterSegments.length >= 3) {
+      cacheTranscript(videoId, chapterSegments);
+      return chapterSegments;
+    }
+  }
+
+  // 5. Native Google Gemini Multimodal / Search Grounding YouTube Transcription
   const geminiSegments = await fetchGeminiYoutubeTranscript(videoId, context);
   if (geminiSegments && geminiSegments.length > 0) {
     cacheTranscript(videoId, geminiSegments);

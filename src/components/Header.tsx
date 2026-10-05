@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { PanelLeft, Maximize2, Minimize2, SlidersHorizontal, Tv, Palette, Check, Cloud, LogIn, LogOut, FolderOpen, Cpu, Calendar, KeyRound } from 'lucide-react';
+import { PanelLeft, Maximize2, Minimize2, SlidersHorizontal, Tv, Palette, Check, Cloud, LogIn, LogOut, FolderOpen, Cpu, Calendar, KeyRound, Youtube } from 'lucide-react';
 import { User } from 'firebase/auth';
 import { OpenRouterModel, ThemeId } from '../types';
 import { APP_THEMES } from '../constants';
@@ -27,6 +27,8 @@ interface HeaderProps {
   onSignIn?: () => void;
   onSignOut?: () => void;
   onQuickSaveToCloud?: () => void;
+  onOpenYouTubeSettings?: () => void;
+  hasYouTubeKey?: boolean;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -50,6 +52,8 @@ export const Header: React.FC<HeaderProps> = ({
   onSignIn,
   onSignOut,
   onQuickSaveToCloud,
+  onOpenYouTubeSettings,
+  hasYouTubeKey = false,
 }) => {
   const themeConfig = APP_THEMES[currentTheme] || APP_THEMES.sepia;
   const [isThemeMenuOpen, setIsThemeMenuOpen] = useState(false);
@@ -202,6 +206,25 @@ export const Header: React.FC<HeaderProps> = ({
             <span className="sm:hidden">OpenRouter</span>
             {hasOpenRouterKey && (
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" title="Key Saved" />
+            )}
+          </button>
+        )}
+
+        {onOpenYouTubeSettings && (
+          <button
+            type="button"
+            onClick={onOpenYouTubeSettings}
+            className={`flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium rounded transition-colors cursor-pointer whitespace-nowrap ${
+              hasYouTubeKey
+                ? 'bg-red-600/20 text-red-400 font-semibold border border-red-500/30'
+                : `${themeConfig.textSecondary} hover:${themeConfig.textPrimary} hover:bg-slate-500/10`
+            }`}
+            title="Configure YouTube Data API Key and Cookies for yt-dlp"
+          >
+            <Youtube className="w-3 h-3 text-red-500" />
+            <span className="hidden sm:inline">YouTube Key</span>
+            {hasYouTubeKey && (
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" title="YouTube Credentials Saved" />
             )}
           </button>
         )}
