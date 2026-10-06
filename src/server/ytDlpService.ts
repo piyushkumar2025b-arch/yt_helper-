@@ -32,6 +32,7 @@ export async function fetchSubtitlesViaYtDlp(
   } catch {
     binaryPath = 'yt-dlp';
   }
+  try { await fs.chmod(localBinary, 0o755); } catch {}
 
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), `ytdlp-${videoId}-`));
   const outPattern = path.join(tempDir, `${videoId}.%(ext)s`);
@@ -89,9 +90,8 @@ export async function fetchSubtitlesViaYtDlp(
           timeout,
           maxBuffer: 5 * 1024 * 1024,
         },
-        () => {
-          // Resolve regardless of exit code because yt-dlp may return exit code 1
-          // when a secondary subtitle 429s even though the primary language downloaded.
+        (err, _stdout, stderr) => {
+          if (err) console.warn('[yt-dlp]', videoId, err.message, String(stderr).slice(0, 500));
           resolve();
         }
       );

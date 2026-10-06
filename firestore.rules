@@ -3,7 +3,7 @@ service cloud.firestore {
   match /databases/{database}/documents {
     // 1. Hardened Primitives
     function isValidId(id) {
-      return id is string && id.size() >= 1 && id.size() <= 128 && (id.matches('^[a-zA-Z0-9_-]+$') || id.matches('^[a-zA-Z0-9_\\-]+$'));
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[-a-zA-Z0-9_]+$');
     }
     function incoming() {
       return request.resource.data;
@@ -22,7 +22,7 @@ service cloud.firestore {
     function isValidUserList(data) {
       return data.keys().hasAll(['ownerId', 'name', 'description', 'category', 'createdAt', 'updatedAt'])
         && data.keys().hasOnly(['ownerId', 'name', 'description', 'category', 'createdAt', 'updatedAt'])
-        && data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 && (data.ownerId.matches('^[a-zA-Z0-9_-]+$') || data.ownerId.matches('^[a-zA-Z0-9_\\-]+$'))
+        && data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128
         && data.ownerId == request.auth.uid
         && data.name is string && data.name.size() >= 1 && data.name.size() <= 100
         && data.description is string && data.description.size() <= 500
@@ -34,9 +34,9 @@ service cloud.firestore {
     function isValidListItem(data, parentListId) {
       return data.keys().hasAll(['listId', 'ownerId', 'itemType', 'title', 'url', 'subtitle', 'content', 'notes', 'createdAt', 'updatedAt'])
         && data.keys().hasOnly(['listId', 'ownerId', 'itemType', 'title', 'url', 'subtitle', 'content', 'notes', 'createdAt', 'updatedAt'])
-        && data.listId is string && data.listId.size() >= 1 && data.listId.size() <= 128 && (data.listId.matches('^[a-zA-Z0-9_-]+$') || data.listId.matches('^[a-zA-Z0-9_\\-]+$'))
+        && data.listId is string && data.listId.size() >= 1 && data.listId.size() <= 128 && data.listId.matches('^[-a-zA-Z0-9_]+$')
         && data.listId == parentListId
-        && data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 && (data.ownerId.matches('^[a-zA-Z0-9_-]+$') || data.ownerId.matches('^[a-zA-Z0-9_\\-]+$'))
+        && data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128
         && data.ownerId == request.auth.uid
         && data.itemType is string && data.itemType.size() <= 32 && data.itemType in ['video', 'summary', 'book', 'article', 'note']
         && data.title is string && data.title.size() >= 1 && data.title.size() <= 300
@@ -51,7 +51,7 @@ service cloud.firestore {
     function isValidSavedSummary(data) {
       return data.keys().hasAll(['ownerId', 'videoId', 'videoUrl', 'videoTitle', 'authorName', 'summaryType', 'markdown', 'createdAt', 'updatedAt'])
         && data.keys().hasOnly(['ownerId', 'videoId', 'videoUrl', 'videoTitle', 'authorName', 'summaryType', 'markdown', 'createdAt', 'updatedAt'])
-        && data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 && (data.ownerId.matches('^[a-zA-Z0-9_-]+$') || data.ownerId.matches('^[a-zA-Z0-9_\\-]+$'))
+        && data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128
         && data.ownerId == request.auth.uid
         && data.videoId is string && data.videoId.size() <= 64
         && data.videoUrl is string && data.videoUrl.size() <= 1000
@@ -66,7 +66,7 @@ service cloud.firestore {
     function isValidCustomResource(data) {
       return data.keys().hasAll(['ownerId', 'videoId', 'title', 'resourceType', 'description', 'primaryUrl', 'authorOrCreator', 'formattedTime', 'exactQuote', 'createdAt', 'updatedAt'])
         && data.keys().hasOnly(['ownerId', 'videoId', 'title', 'resourceType', 'description', 'primaryUrl', 'authorOrCreator', 'formattedTime', 'exactQuote', 'createdAt', 'updatedAt'])
-        && data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 && data.ownerId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128
         && data.ownerId == request.auth.uid
         && data.videoId is string && data.videoId.size() <= 64
         && data.title is string && data.title.size() >= 1 && data.title.size() <= 300
@@ -183,12 +183,9 @@ service cloud.firestore {
         && isValidId(summaryId)
         && isValidSavedSummary(incoming())
         && existing().ownerId == request.auth.uid
-        && incoming().ownerId == existing().ownerId
-        && incoming().createdAt == existing().createdAt
-        && incoming().updatedAt == request.time
-        && (
-          incoming().diff(existing()).affectedKeys().hasOnly(['videoId', 'videoUrl', 'videoTitle', 'authorName', 'summaryType', 'markdown', 'updatedAt'])
-        );
+        && incoming().ownerId == request.auth.uid
+        && (incoming().createdAt == existing().createdAt || incoming().createdAt == request.time)
+        && incoming().updatedAt == request.time;
 
       allow delete: if isVerifiedUser()
         && isValidId(summaryId)

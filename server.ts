@@ -33,6 +33,10 @@ import {
   extractGroundedFacts,
   extractChronologicalTimeline,
   verifyClaimAgainstTranscript,
+  extractKeyEntitiesAndConcepts,
+  generateHierarchicalGroundedSummary,
+  detectContradictionsAndCaveats,
+  synthesizeGroundedAnswer,
 } from './src/server/ragEngine.ts';
 import {
   detectMediaSourceType,
@@ -1862,9 +1866,55 @@ ${transcript.slice(0, 120000)}
           .map((c: string) => verifyClaimAgainstTranscript(index, c));
       }
 
+      if (mode === 'all' || mode === 'entities' || mode === 'concepts') {
+        responsePayload.entities = extractKeyEntitiesAndConcepts(index, 12);
+      }
+
+      if (mode === 'all' || mode === 'chapters' || mode === 'hierarchical') {
+        responsePayload.chapters = generateHierarchicalGroundedSummary(index, 5);
+      }
+
+      if (mode === 'all' || mode === 'caveats' || mode === 'warnings') {
+        responsePayload.caveats = detectContradictionsAndCaveats(index, 8);
+      }
+
+      if (mode === 'all' || mode === 'answer' || mode === 'qa') {
+        if (query && query.trim().length > 2) {
+          responsePayload.groundedAnswer = synthesizeGroundedAnswer(index, query);
+        }
+      }
+
       res.json(responsePayload);
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'RAG processing failed.' });
+    }
+  });
+
+  // Dedicated RAG Q&A endpoint for instant timestamp-anchored answers
+  app.post('/api/rag-qa', async (req: Request, res: Response) => {
+    try {
+      const { transcript, segments, question, title } = req.body;
+      if (!question || !question.trim()) {
+        res.status(400).json({ error: 'Question is required for RAG Q&A.' });
+        return;
+      }
+      if (!transcript && (!segments || segments.length === 0)) {
+        res.status(400).json({ error: 'Transcript or segments are required for RAG Q&A.' });
+        return;
+      }
+
+      const index = createTranscriptIndex(String(transcript || ''), segments);
+      const answerResult = synthesizeGroundedAnswer(index, question);
+      const retrieved = retrieveWithMultiQueryRRF(index, question, 5, 2);
+
+      res.json({
+        ok: true,
+        title: title || 'Video Transcript',
+        ...answerResult,
+        retrievedContext: formatRetrievedContextForPrompt(retrieved),
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'RAG Q&A synthesis failed.' });
     }
   });
 

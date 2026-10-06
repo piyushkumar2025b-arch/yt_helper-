@@ -490,6 +490,49 @@ export interface ClaimVerification {
   explanation: string;
 }
 
+export interface GroundedEntity {
+  name: string;
+  category: 'person' | 'technology' | 'organization' | 'concept' | 'metric';
+  occurrences: Array<{
+    timestamp: string;
+    seconds: number;
+    context: string;
+  }>;
+  totalMentions: number;
+  significance: 'high' | 'medium' | 'low';
+}
+
+export interface GroundedChapter {
+  chapterIndex: number;
+  title: string;
+  timeRange: string;
+  startSec: number;
+  endSec: number;
+  keyPoints: string[];
+  takeaway: string;
+  verbatimQuote: string;
+}
+
+export interface GroundedCaveat {
+  timestamp: string;
+  timestampSeconds: number;
+  type: 'warning' | 'misconception' | 'limitation' | 'tradeoff';
+  statement: string;
+  quote: string;
+}
+
+export interface GroundedAnswer {
+  query: string;
+  answer: string;
+  confidenceScore: number;
+  citations: Array<{
+    timestamp: string;
+    seconds: number;
+    excerpt: string;
+  }>;
+  keyTakeaways: string[];
+}
+
 /**
  * Decomposes and expands a query into semantic perspectives to maximize RAG retrieval recall.
  */
@@ -752,5 +795,272 @@ export function verifyClaimAgainstTranscript(
       text: p.expandedText.slice(0, 220),
     })),
     explanation,
+  };
+}
+
+/**
+ * Extracts key domain entities and recurring technical/thematic concepts
+ * with timestamped context and occurrence tracking.
+ */
+export function extractKeyEntitiesAndConcepts(
+  index: TranscriptIndex,
+  maxEntities = 10
+): GroundedEntity[] {
+  const entityMap = new Map<string, {
+    category: GroundedEntity['category'];
+    occurrences: GroundedEntity['occurrences'];
+  }>();
+
+  // Known entity classification patterns
+  const techPattern = /\b(?:python|javascript|typescript|react|nextjs|node|rust|c\+\+|sql|postgres|docker|kubernetes|aws|google cloud|gemini|openai|chatgpt|gpt-4|llm|transformer|rag|neural network|machine learning|deep learning|api|graphql|fastapi|pytorch|tensorflow|linux|git|github)\b/i;
+  const metricPattern = /\b(?:billion|million|percent|growth rate|revenue|roi|latency|throughput|accuracy|precision|parameter count|tokens?|bandwidth)\b/i;
+  const orgPattern = /\b(?:google|apple|microsoft|meta|amazon|nvidia|anthropic|openai|stanford|mit|harvard|berkley|y combinator|tesla)\b/i;
+
+  const properNounRegex = /\b[A-Z][a-zA-Z0-9_-]+(?:\s+[A-Z][a-zA-Z0-9_-]+)*\b/g;
+
+  for (const chunk of index.chunks) {
+    const text = chunk.text;
+    const matches = text.match(properNounRegex) || [];
+
+    for (const rawName of matches) {
+      const cleanName = rawName.trim();
+      const lower = cleanName.toLowerCase();
+      if (
+        cleanName.length < 3 ||
+        COMMON_STOP_WORDS.has(lower) ||
+        /^(The|This|That|These|Those|When|What|Where|Which|Who|How|Why|There|Here|And|But|Because|Although|However|Today|Yesterday|Tomorrow|Now|Then)$/i.test(cleanName)
+      ) {
+        continue;
+      }
+
+      let category: GroundedEntity['category'] = 'concept';
+      if (techPattern.test(cleanName)) {
+        category = 'technology';
+      } else if (orgPattern.test(cleanName)) {
+        category = 'organization';
+      } else if (metricPattern.test(cleanName)) {
+        category = 'metric';
+      } else if (cleanName.split(/\s+/).length >= 2 && !/system|model|architecture|process|theory|concept/i.test(cleanName)) {
+        category = 'person';
+      }
+
+      let entry = entityMap.get(cleanName);
+      if (!entry) {
+        entry = { category, occurrences: [] };
+        entityMap.set(cleanName, entry);
+      }
+
+      if (entry.occurrences.length < 5) {
+        const sentences = text.split(/(?<=[.!?])\s+/);
+        const matchSent = sentences.find((s) => s.includes(cleanName)) || text.slice(0, 160);
+        entry.occurrences.push({
+          timestamp: chunk.formattedStart,
+          seconds: chunk.startSec,
+          context: matchSent.trim().slice(0, 180),
+        });
+      }
+    }
+  }
+
+  const entities: GroundedEntity[] = Array.from(entityMap.entries())
+    .map(([name, data]) => {
+      const totalMentions = data.occurrences.length;
+      return {
+        name,
+        category: data.category,
+        occurrences: data.occurrences,
+        totalMentions,
+        significance: (totalMentions >= 3 ? 'high' : totalMentions === 2 ? 'medium' : 'low') as GroundedEntity['significance'],
+      };
+    })
+    .sort((a, b) => b.totalMentions - a.totalMentions);
+
+  return entities.slice(0, maxEntities);
+}
+
+/**
+ * Builds a hierarchical chapter breakdown with exact quote anchors,
+ * time boundaries, and key actionable takeaways.
+ */
+export function generateHierarchicalGroundedSummary(
+  index: TranscriptIndex,
+  targetChapters = 5
+): GroundedChapter[] {
+  if (index.chunks.length === 0) return [];
+
+  const chunks = index.chunks;
+  const chunkCount = chunks.length;
+  const numChapters = Math.min(Math.max(3, targetChapters), Math.max(1, Math.min(8, Math.ceil(chunkCount / 2))));
+  const chunksPerChapter = Math.max(1, Math.floor(chunkCount / numChapters));
+
+  const chapters: GroundedChapter[] = [];
+
+  for (let c = 0; c < numChapters; c++) {
+    const startIdx = c * chunksPerChapter;
+    const endIdx = c === numChapters - 1 ? chunkCount - 1 : Math.min(chunkCount - 1, (c + 1) * chunksPerChapter - 1);
+    const chapterChunks = chunks.slice(startIdx, endIdx + 1);
+    if (chapterChunks.length === 0) continue;
+
+    const firstChunk = chapterChunks[0];
+    const lastChunk = chapterChunks[chapterChunks.length - 1];
+    const startSec = firstChunk.startSec;
+    const endSec = lastChunk.endSec;
+    const timeRange = `${firstChunk.formattedStart} - ${lastChunk.formattedEnd}`;
+
+    // Extract salient sentences
+    const allSentences: string[] = [];
+    for (const ch of chapterChunks) {
+      allSentences.push(...ch.text.split(/(?<=[.!?])\s+/).map((s) => s.trim()).filter((s) => s.length >= 25 && s.length <= 250));
+    }
+
+    const titleCandidate = allSentences[0] || `Section ${c + 1}`;
+    const cleanTitle = titleCandidate
+      .replace(/^[A-Z0-9_-]+:\s*/, '')
+      .replace(/^So\s+|^And\s+|^Now\s+/i, '')
+      .slice(0, 75);
+
+    const keyPoints: string[] = [];
+    const usedSentences = new Set<string>();
+
+    for (const sent of allSentences) {
+      if (keyPoints.length >= 3) break;
+      if (
+        !usedSentences.has(sent) &&
+        (sent.includes('because') ||
+          sent.includes('important') ||
+          sent.includes('key') ||
+          sent.includes('means') ||
+          sent.includes('result') ||
+          sent.length > 50)
+      ) {
+        usedSentences.add(sent);
+        keyPoints.push(sent);
+      }
+    }
+
+    if (keyPoints.length === 0 && allSentences.length > 0) {
+      keyPoints.push(allSentences[0]);
+    }
+
+    const verbatimQuote = allSentences.find((s) => s.length >= 40 && s.length <= 150) || allSentences[0] || 'Key principle discussed in this section.';
+    const takeaway = keyPoints[keyPoints.length - 1] || 'Understanding this phase enables deeper insight into the overarching subject.';
+
+    chapters.push({
+      chapterIndex: c + 1,
+      title: cleanTitle.length > 5 ? cleanTitle : `Key Phase ${c + 1}: Foundations & Core Principles`,
+      timeRange,
+      startSec,
+      endSec,
+      keyPoints,
+      takeaway,
+      verbatimQuote,
+    });
+  }
+
+  return chapters;
+}
+
+/**
+ * Scans the transcript index for caveats, warnings, trade-offs, and common misconceptions.
+ */
+export function detectContradictionsAndCaveats(
+  index: TranscriptIndex,
+  maxCaveats = 6
+): GroundedCaveat[] {
+  const caveats: GroundedCaveat[] = [];
+  const seenStatements = new Set<string>();
+
+  const caveatPatterns: Array<{ regex: RegExp; type: GroundedCaveat['type'] }> = [
+    { regex: /\b(?:common mistake|people get wrong|the danger is|don't make the mistake|be careful with|watch out for)\b/i, type: 'warning' },
+    { regex: /\b(?:contrary to|popular belief|myth|misconception|not actually true|many assume)\b/i, type: 'misconception' },
+    { regex: /\b(?:the limitation is|drawback|doesn't work when|fails if|not suitable for|bottleneck)\b/i, type: 'limitation' },
+    { regex: /\b(?:trade-off|tradeoff|on the other hand|compromise|downside is|costs more)\b/i, type: 'tradeoff' },
+  ];
+
+  for (const chunk of index.chunks) {
+    const sentences = chunk.text.split(/(?<=[.!?])\s+/).map((s) => s.trim());
+    for (const sent of sentences) {
+      if (sent.length < 25 || sent.length > 250) continue;
+      const lower = sent.toLowerCase();
+      if (seenStatements.has(lower)) continue;
+
+      for (const { regex, type } of caveatPatterns) {
+        if (regex.test(sent)) {
+          seenStatements.add(lower);
+          caveats.push({
+            timestamp: chunk.formattedStart,
+            timestampSeconds: chunk.startSec,
+            type,
+            statement: sent,
+            quote: `"${sent}" (recorded at ${chunk.formattedStart})`,
+          });
+          break;
+        }
+      }
+
+      if (caveats.length >= maxCaveats) break;
+    }
+    if (caveats.length >= maxCaveats) break;
+  }
+
+  return caveats;
+}
+
+/**
+ * Synthesizes a grounded factual answer with verbatim citations directly from the transcript index.
+ */
+export function synthesizeGroundedAnswer(
+  index: TranscriptIndex,
+  question: string
+): GroundedAnswer {
+  const cleanQ = String(question || '').trim();
+  const retrieved = retrieveWithMultiQueryRRF(index, cleanQ, 5, 2);
+
+  if (retrieved.length === 0) {
+    return {
+      query: cleanQ,
+      answer: 'No relevant information was found in the video transcript for this query.',
+      confidenceScore: 0.1,
+      citations: [],
+      keyTakeaways: [],
+    };
+  }
+
+  const citations: GroundedAnswer['citations'] = [];
+  const takeaways: string[] = [];
+  const queryTokens = tokenizeText(cleanQ);
+
+  for (const r of retrieved.slice(0, 3)) {
+    const sentences = r.expandedText.split(/(?<=[.!?])\s+/).map((s) => s.trim());
+    const bestSent = sentences.find((s) => {
+      const sLower = s.toLowerCase();
+      return queryTokens.some((t) => sLower.includes(t)) && s.length >= 30;
+    }) || sentences[0] || r.chunk.text.slice(0, 120);
+
+    citations.push({
+      timestamp: r.chunk.formattedStart,
+      seconds: r.chunk.startSec,
+      excerpt: bestSent.slice(0, 200),
+    });
+
+    if (bestSent.length >= 35 && !takeaways.includes(bestSent)) {
+      takeaways.push(bestSent);
+    }
+  }
+
+  const bestPassage = retrieved[0];
+  const confidenceScore = Math.min(0.95, Math.max(0.6, bestPassage.score * 5));
+
+  const answerParagraphs = [
+    `Based on the video audio, the speaker addresses **"${cleanQ}"** primarily around **${bestPassage.chunk.formattedStart}**:`,
+    ...citations.map((c) => `- **[${c.timestamp}]**: "${c.excerpt}"`),
+  ];
+
+  return {
+    query: cleanQ,
+    answer: answerParagraphs.join('\n\n'),
+    confidenceScore: Math.round(confidenceScore * 100) / 100,
+    citations,
+    keyTakeaways: takeaways.slice(0, 4),
   };
 }
