@@ -3,7 +3,7 @@ service cloud.firestore {
   match /databases/{database}/documents {
     // 1. Hardened Primitives
     function isValidId(id) {
-      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+      return id is string && id.size() >= 1 && id.size() <= 128 && (id.matches('^[a-zA-Z0-9_-]+$') || id.matches('^[a-zA-Z0-9_\\-]+$'));
     }
     function incoming() {
       return request.resource.data;
@@ -22,7 +22,7 @@ service cloud.firestore {
     function isValidUserList(data) {
       return data.keys().hasAll(['ownerId', 'name', 'description', 'category', 'createdAt', 'updatedAt'])
         && data.keys().hasOnly(['ownerId', 'name', 'description', 'category', 'createdAt', 'updatedAt'])
-        && data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 && data.ownerId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 && (data.ownerId.matches('^[a-zA-Z0-9_-]+$') || data.ownerId.matches('^[a-zA-Z0-9_\\-]+$'))
         && data.ownerId == request.auth.uid
         && data.name is string && data.name.size() >= 1 && data.name.size() <= 100
         && data.description is string && data.description.size() <= 500
@@ -34,15 +34,15 @@ service cloud.firestore {
     function isValidListItem(data, parentListId) {
       return data.keys().hasAll(['listId', 'ownerId', 'itemType', 'title', 'url', 'subtitle', 'content', 'notes', 'createdAt', 'updatedAt'])
         && data.keys().hasOnly(['listId', 'ownerId', 'itemType', 'title', 'url', 'subtitle', 'content', 'notes', 'createdAt', 'updatedAt'])
-        && data.listId is string && data.listId.size() >= 1 && data.listId.size() <= 128 && data.listId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.listId is string && data.listId.size() >= 1 && data.listId.size() <= 128 && (data.listId.matches('^[a-zA-Z0-9_-]+$') || data.listId.matches('^[a-zA-Z0-9_\\-]+$'))
         && data.listId == parentListId
-        && data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 && data.ownerId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 && (data.ownerId.matches('^[a-zA-Z0-9_-]+$') || data.ownerId.matches('^[a-zA-Z0-9_\\-]+$'))
         && data.ownerId == request.auth.uid
         && data.itemType is string && data.itemType.size() <= 32 && data.itemType in ['video', 'summary', 'book', 'article', 'note']
         && data.title is string && data.title.size() >= 1 && data.title.size() <= 300
         && data.url is string && data.url.size() <= 1000
         && data.subtitle is string && data.subtitle.size() <= 300
-        && data.content is string && data.content.size() <= 50000
+        && data.content is string && data.content.size() <= 500000
         && data.notes is string && data.notes.size() <= 5000
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
@@ -51,14 +51,14 @@ service cloud.firestore {
     function isValidSavedSummary(data) {
       return data.keys().hasAll(['ownerId', 'videoId', 'videoUrl', 'videoTitle', 'authorName', 'summaryType', 'markdown', 'createdAt', 'updatedAt'])
         && data.keys().hasOnly(['ownerId', 'videoId', 'videoUrl', 'videoTitle', 'authorName', 'summaryType', 'markdown', 'createdAt', 'updatedAt'])
-        && data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 && data.ownerId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 && (data.ownerId.matches('^[a-zA-Z0-9_-]+$') || data.ownerId.matches('^[a-zA-Z0-9_\\-]+$'))
         && data.ownerId == request.auth.uid
         && data.videoId is string && data.videoId.size() <= 64
         && data.videoUrl is string && data.videoUrl.size() <= 1000
         && data.videoTitle is string && data.videoTitle.size() >= 1 && data.videoTitle.size() <= 300
         && data.authorName is string && data.authorName.size() <= 200
         && data.summaryType is string && data.summaryType.size() >= 1 && data.summaryType.size() <= 64
-        && data.markdown is string && data.markdown.size() >= 1 && data.markdown.size() <= 50000
+        && data.markdown is string && data.markdown.size() >= 1 && data.markdown.size() <= 500000
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
     }
@@ -102,7 +102,7 @@ service cloud.firestore {
 
     // 4. Collection: /lists/{listId}
     match /lists/{listId} {
-      allow get: if isSignedIn() && isValidId(listId) && existing().ownerId == request.auth.uid;
+      allow get: if isSignedIn() && isValidId(listId) && (resource == null || existing().ownerId == request.auth.uid);
       allow list: if isSignedIn() && existing().ownerId == request.auth.uid;
 
       allow create: if isVerifiedUser()
@@ -131,7 +131,7 @@ service cloud.firestore {
         allow get: if isSignedIn()
           && isValidId(listId)
           && isValidId(itemId)
-          && existing().ownerId == request.auth.uid
+          && (resource == null || existing().ownerId == request.auth.uid)
           && isParentListOwner(listId);
 
         allow list: if isSignedIn()
@@ -170,7 +170,7 @@ service cloud.firestore {
 
     // 6. Collection: /summaries/{summaryId}
     match /summaries/{summaryId} {
-      allow get: if isSignedIn() && isValidId(summaryId) && existing().ownerId == request.auth.uid;
+      allow get: if isSignedIn() && isValidId(summaryId) && (resource == null || existing().ownerId == request.auth.uid);
       allow list: if isSignedIn() && existing().ownerId == request.auth.uid;
 
       allow create: if isVerifiedUser()
@@ -197,7 +197,7 @@ service cloud.firestore {
 
     // 7. Collection: /resources/{resourceId}
     match /resources/{resourceId} {
-      allow get: if isSignedIn() && isValidId(resourceId) && existing().ownerId == request.auth.uid;
+      allow get: if isSignedIn() && isValidId(resourceId) && (resource == null || existing().ownerId == request.auth.uid);
       allow list: if isSignedIn() && existing().ownerId == request.auth.uid;
 
       allow create: if isVerifiedUser()
@@ -224,7 +224,7 @@ service cloud.firestore {
 
     // 8. Collection: /history/{historyId}
     match /history/{historyId} {
-      allow get: if isSignedIn() && isValidId(historyId) && existing().ownerId == request.auth.uid;
+      allow get: if isSignedIn() && isValidId(historyId) && (resource == null || existing().ownerId == request.auth.uid);
       allow list: if isSignedIn() && existing().ownerId == request.auth.uid;
 
       allow create: if isVerifiedUser()

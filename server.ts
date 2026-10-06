@@ -26,9 +26,13 @@ import {
 import {
   createTranscriptIndex,
   retrieveRelevantChunks,
+  retrieveWithMultiQueryRRF,
   formatRetrievedContextForPrompt,
   buildGroundedExtractiveAnswer,
   buildGroundedDeepDive,
+  extractGroundedFacts,
+  extractChronologicalTimeline,
+  verifyClaimAgainstTranscript,
 } from './src/server/ragEngine.ts';
 import {
   detectMediaSourceType,
@@ -1569,16 +1573,20 @@ If the last sentence above is unfinished, complete it immediately and then conti
         return;
       }
 
-      // RAG Retrieval: Hierarchical chunking & BM25/TF-IDF retrieval for topic-relevant passages
+      // Advanced RAG Retrieval: Multi-Query RRF + Grounded Facts
       const transcriptIndex = createTranscriptIndex(transcript, segments);
-      const retrievedPassages = retrieveRelevantChunks(transcriptIndex, topic, 7, 2);
+      const retrievedPassages = retrieveWithMultiQueryRRF(transcriptIndex, topic, 8, 2);
       const groundedContextBlock = formatRetrievedContextForPrompt(retrievedPassages);
+      const keyFacts = extractGroundedFacts(transcriptIndex, topic, 4);
+      const factsBlock = keyFacts.length > 0
+        ? `\nKEY GROUNDED FACTS & METRICS IN AUDIO:\n${keyFacts.map((f) => `- [${f.timestamp}] ${f.fact}`).join('\n')}\n`
+        : '';
 
       const prompt = `You are a thoughtful, clear human guide. The user wants a deeper, more detailed explanation of "${topic}" from the video "${title || 'Video'}".
 Read through the transcript and the exact grounded audio passages below, and explain every nuance, story, example, quote, and practical lesson about "${topic}" in natural, engaging everyday English. Always include helpful [MM:SS] timestamps where the speaker discusses it.
 
 ${groundedContextBlock}
-
+${factsBlock}
 TRANSCRIPT:
 ${transcript.slice(0, 120000)}
 `;
@@ -1688,17 +1696,21 @@ ${transcript.slice(0, 120000)}
 
       let chatWarning = '';
 
-      // RAG Retrieval: Hierarchical chunking & BM25/TF-IDF retrieval for question-relevant passages
+      // Advanced RAG Retrieval: Multi-Query RRF + Grounded Facts
       const transcriptIndex = createTranscriptIndex(transcript, segments);
-      const retrievedPassages = retrieveRelevantChunks(transcriptIndex, question, 6, 2);
+      const retrievedPassages = retrieveWithMultiQueryRRF(transcriptIndex, question, 7, 2);
       const groundedContextBlock = formatRetrievedContextForPrompt(retrievedPassages);
+      const keyFacts = extractGroundedFacts(transcriptIndex, question, 3);
+      const factsBlock = keyFacts.length > 0
+        ? `\nVERIFIED AUDIO FACTS & METRICS:\n${keyFacts.map((f) => `- [${f.timestamp}] ${f.fact}`).join('\n')}\n`
+        : '';
 
       const prompt = `You are a friendly, helpful person who just watched the YouTube video "${title || 'Video'}" and knows it inside out.
 Answer the user's question clearly, warmly, and naturally in plain everyday English based on the video transcript and the exact grounded passages below.
 Avoid stiff clichés or robotic jargon. Always cite the exact verified [MM:SS] timestamps where these points are discussed.
 
 ${groundedContextBlock}
-
+${factsBlock}
 USER QUESTION:
 ${question}
 
@@ -1731,7 +1743,17 @@ ${transcript.slice(0, 120000)}
               const data = (await orRes.json()) as any;
               const ans = data.choices?.[0]?.message?.content || '';
               if (ans.trim()) {
-                res.json({ answer: ans, providerUsed: 'openrouter', modelUsed: targetModel });
+                res.json({
+                  answer: ans,
+                  providerUsed: 'openrouter',
+                  modelUsed: targetModel,
+                  citations: retrievedPassages.map((p) => ({
+                    range: p.formattedRange,
+                    start: p.expandedStartSec,
+                    text: p.chunk.text.slice(0, 160),
+                  })),
+                  groundedFacts: keyFacts,
+                });
                 return;
               }
             } else {
@@ -1754,6 +1776,12 @@ ${transcript.slice(0, 120000)}
             providerUsed: result.providerUsed,
             modelUsed: result.modelUsed,
             warning: [chatWarning, result.warning].filter(Boolean).join(' ') || undefined,
+            citations: retrievedPassages.map((p) => ({
+              range: p.formattedRange,
+              start: p.expandedStartSec,
+              text: p.chunk.text.slice(0, 160),
+            })),
+            groundedFacts: keyFacts,
           });
           return;
         }
@@ -1764,11 +1792,79 @@ ${transcript.slice(0, 120000)}
         providerUsed: 'local-extractive',
         modelUsed: 'extractive-fallback',
         warning: chatWarning || undefined,
+        citations: retrievedPassages.map((p) => ({
+          range: p.formattedRange,
+          start: p.expandedStartSec,
+          text: p.chunk.text.slice(0, 160),
+        })),
+        groundedFacts: keyFacts,
       });
     } catch (e: any) {
       res.status(500).json({
         error: e?.message || 'Chat request failed.',
       });
+    }
+  });
+
+  // Dedicated Enterprise RAG Pipeline Endpoint: /api/rag/process
+  app.post('/api/rag/process', async (req: Request, res: Response) => {
+    try {
+      const {
+        transcript,
+        segments,
+        query = '',
+        title = 'Video',
+        mode = 'all', // 'all' | 'search' | 'facts' | 'timeline' | 'verify'
+        claims = [],
+        topK = 6,
+      } = req.body;
+
+      if (!transcript && (!segments || segments.length === 0)) {
+        res.status(400).json({ error: 'Transcript or segments are required for RAG processing.' });
+        return;
+      }
+
+      const rawText = String(transcript || '');
+      const index = createTranscriptIndex(rawText, segments);
+
+      const responsePayload: any = {
+        ok: true,
+        totalChunks: index.totalChunks,
+        avgChunkLength: Math.round(index.avgChunkLength),
+      };
+
+      if (mode === 'all' || mode === 'search') {
+        const cleanQuery = String(query || title || '').trim();
+        const retrieved = retrieveWithMultiQueryRRF(index, cleanQuery, topK, 2);
+        responsePayload.retrievedPassages = retrieved.map((r) => ({
+          chunkId: r.chunk.id,
+          score: Math.round(r.score * 1000) / 1000,
+          range: r.formattedRange,
+          startSec: r.expandedStartSec,
+          endSec: r.expandedEndSec,
+          text: r.expandedText,
+        }));
+        responsePayload.groundedContext = formatRetrievedContextForPrompt(retrieved);
+      }
+
+      if (mode === 'all' || mode === 'facts') {
+        responsePayload.groundedFacts = extractGroundedFacts(index, query, 8);
+      }
+
+      if (mode === 'all' || mode === 'timeline') {
+        responsePayload.timeline = extractChronologicalTimeline(index, query);
+      }
+
+      if (mode === 'all' || mode === 'verify') {
+        const claimsToVerify = Array.isArray(claims) && claims.length > 0 ? claims : [query];
+        responsePayload.verifications = claimsToVerify
+          .filter((c: any) => typeof c === 'string' && c.trim().length > 3)
+          .map((c: string) => verifyClaimAgainstTranscript(index, c));
+      }
+
+      res.json(responsePayload);
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'RAG processing failed.' });
     }
   });
 

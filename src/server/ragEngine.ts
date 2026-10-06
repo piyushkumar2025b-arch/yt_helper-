@@ -461,3 +461,296 @@ export function buildGroundedDeepDive(
     '\n\n'
   )}\n\n**Takeaway:** The discussion connects ${cleanTopic} with practical applications and key principles shared throughout the presentation.`;
 }
+
+export interface GroundedFact {
+  fact: string;
+  timestamp: string;
+  timestampSeconds: number;
+  confidence: number;
+  evidence: string;
+  category: 'statistic' | 'definition' | 'core_argument' | 'takeaway' | 'key_event';
+}
+
+export interface TimelineEvent {
+  time: string;
+  seconds: number;
+  title: string;
+  summary: string;
+  significance: 'high' | 'medium' | 'context';
+}
+
+export interface ClaimVerification {
+  claim: string;
+  status: 'strongly_supported' | 'partially_supported' | 'unsupported_or_contradicted';
+  confidenceScore: number;
+  relevantPassages: Array<{
+    timestamp: string;
+    text: string;
+  }>;
+  explanation: string;
+}
+
+/**
+ * Decomposes and expands a query into semantic perspectives to maximize RAG retrieval recall.
+ */
+export function generateQueryExpansions(query: string): string[] {
+  const clean = String(query || '').trim();
+  if (!clean) return [];
+
+  const expansions = new Set<string>();
+  expansions.add(clean);
+
+  // Extract core keywords
+  const tokens = tokenizeText(clean);
+  if (tokens.length >= 2) {
+    expansions.add(tokens.join(' '));
+  }
+
+  // Question reformulations
+  if (!/^(what|how|why|when|where|who)/i.test(clean)) {
+    expansions.add(`what does the video say about ${clean}`);
+    expansions.add(`how does ${clean} work`);
+  }
+
+  // Sub-phrases if longer query
+  if (tokens.length >= 4) {
+    expansions.add(tokens.slice(0, 3).join(' '));
+    expansions.add(tokens.slice(-3).join(' '));
+  }
+
+  return Array.from(expansions).slice(0, 4);
+}
+
+/**
+ * Advanced Multi-Query Retrieval using Reciprocal Rank Fusion (RRF).
+ * Queries multiple semantic perspectives and synthesizes an optimal rank order.
+ */
+export function retrieveWithMultiQueryRRF(
+  index: TranscriptIndex,
+  query: string,
+  topK = 6,
+  expandWindowSegments = 2
+): RetrievedChunk[] {
+  const queryVariants = generateQueryExpansions(query);
+  if (queryVariants.length === 0) {
+    return retrieveRelevantChunks(index, query, topK, expandWindowSegments);
+  }
+
+  const rrfScores = new Map<number, number>();
+  const chunkMap = new Map<number, RetrievedChunk>();
+  const RRF_K = 60;
+
+  for (const variant of queryVariants) {
+    const results = retrieveRelevantChunks(index, variant, Math.max(topK * 2, 10), expandWindowSegments);
+    results.forEach((retrieved, rank) => {
+      const chunkId = retrieved.chunk.id;
+      const currentScore = rrfScores.get(chunkId) || 0;
+      // Standard Reciprocal Rank Fusion: 1 / (K + rank)
+      rrfScores.set(chunkId, currentScore + 1 / (RRF_K + rank + 1));
+      if (!chunkMap.has(chunkId)) {
+        chunkMap.set(chunkId, retrieved);
+      }
+    });
+  }
+
+  // Information density bonus for technical metrics, numbers, and key punctuation
+  const scoredChunks = Array.from(chunkMap.entries()).map(([chunkId, retrieved]) => {
+    let rrf = rrfScores.get(chunkId) || 0;
+    const text = retrieved.expandedText;
+
+    // Density bonus: numbers, percentages, currency, technical quotes
+    const numMatches = text.match(/\b\d+(?:\.\d+)?%?|\$\d+/g)?.length || 0;
+    if (numMatches > 0) rrf += Math.min(0.015 * numMatches, 0.05);
+
+    // Quote or key term bonus
+    if (/["'“”‘’]/.test(text)) rrf += 0.01;
+
+    return {
+      ...retrieved,
+      score: rrf,
+    };
+  });
+
+  scoredChunks.sort((a, b) => b.score - a.score);
+  return scoredChunks.slice(0, topK);
+}
+
+/**
+ * Extracts timestamp-grounded factual claims, definitions, and statistics directly from transcript chunks.
+ */
+export function extractGroundedFacts(
+  index: TranscriptIndex,
+  topicOrQuery?: string,
+  maxFacts = 8
+): GroundedFact[] {
+  const chunksToScan = topicOrQuery && topicOrQuery.trim().length > 2
+    ? retrieveWithMultiQueryRRF(index, topicOrQuery, 8, 1).map((r) => r.chunk)
+    : index.chunks;
+
+  const facts: GroundedFact[] = [];
+  const seenSentences = new Set<string>();
+
+  const statRegex = /\b(?:\d+(?:\.\d+)?%|\$\d+(?:\.\d+)?(?:\s*(?:billion|million|trillion|k|m))?|\d+\s*(?:times|percent|fold|years|months|days|hours|minutes|seconds))\b/i;
+  const defRegex = /\b(?:is defined as|means that|refer(?:s|red)? to|is called|essentially is|known as)\b/i;
+  const coreRegex = /\b(?:the key is|most important|rule of thumb|crucial factor|the secret|takeaway|bottom line)\b/i;
+
+  for (const chunk of chunksToScan) {
+    const sentences = chunk.text.split(/(?<=[.!?])\s+/).map((s) => s.trim());
+    for (const sent of sentences) {
+      if (sent.length < 25 || sent.length > 280) continue;
+      const lower = sent.toLowerCase();
+      if (seenSentences.has(lower)) continue;
+
+      let category: GroundedFact['category'] | null = null;
+      let confidence = 0.85;
+
+      if (statRegex.test(sent)) {
+        category = 'statistic';
+        confidence = 0.95;
+      } else if (defRegex.test(sent)) {
+        category = 'definition';
+        confidence = 0.92;
+      } else if (coreRegex.test(sent)) {
+        category = 'core_argument';
+        confidence = 0.9;
+      }
+
+      if (category) {
+        seenSentences.add(lower);
+        facts.push({
+          fact: sent,
+          timestamp: chunk.formattedStart,
+          timestampSeconds: chunk.startSec,
+          confidence,
+          evidence: `Spoken around ${chunk.formattedStart} in the presentation audio.`,
+          category,
+        });
+      }
+
+      if (facts.length >= maxFacts) break;
+    }
+    if (facts.length >= maxFacts) break;
+  }
+
+  return facts;
+}
+
+/**
+ * Builds a chronological thematic roadmap across the video timeline.
+ */
+export function extractChronologicalTimeline(
+  index: TranscriptIndex,
+  query?: string
+): TimelineEvent[] {
+  if (index.chunks.length === 0 && index.allSegments.length === 0) return [];
+
+  let timelineChunks: Array<{ text: string; startSec: number; formattedStart: string }> = [];
+  if (query && query.trim().length > 2) {
+    const retrieved = retrieveWithMultiQueryRRF(index, query, 8, 1);
+    timelineChunks = retrieved.map((r) => ({
+      text: r.chunk.text,
+      startSec: r.chunk.startSec,
+      formattedStart: r.chunk.formattedStart,
+    })).sort((a, b) => a.startSec - b.startSec);
+  } else if (index.chunks.length >= 3) {
+    const step = Math.max(1, Math.floor(index.chunks.length / 6));
+    for (let i = 0; i < index.chunks.length; i += step) {
+      timelineChunks.push({
+        text: index.chunks[i].text,
+        startSec: index.chunks[i].startSec,
+        formattedStart: index.chunks[i].formattedStart,
+      });
+    }
+  } else if (index.allSegments.length > 0) {
+    const segs = index.allSegments;
+    const step = Math.max(1, Math.floor(segs.length / 4));
+    for (let i = 0; i < segs.length; i += step) {
+      const seg = segs[i];
+      const start = typeof seg.start === 'number' ? seg.start : 0;
+      timelineChunks.push({
+        text: String(seg.text || ''),
+        startSec: start,
+        formattedStart: seg.formattedTime || formatTime(start),
+      });
+    }
+  } else {
+    timelineChunks = index.chunks.map((c) => ({
+      text: c.text,
+      startSec: c.startSec,
+      formattedStart: c.formattedStart,
+    }));
+  }
+
+  return timelineChunks.map((c, idx) => {
+    const firstSent = c.text.split(/(?<=[.!?])\s+/)[0] || c.text.slice(0, 80);
+    return {
+      time: c.formattedStart,
+      seconds: c.startSec,
+      title: firstSent.slice(0, 60),
+      summary: c.text.slice(0, 180) + '...',
+      significance: idx === 0 || idx === timelineChunks.length - 1 ? 'high' : 'medium',
+    };
+  });
+}
+
+/**
+ * Verifies an external claim or summary statement against the transcript index to guard against hallucinations.
+ */
+export function verifyClaimAgainstTranscript(
+  index: TranscriptIndex,
+  claim: string
+): ClaimVerification {
+  const cleanClaim = String(claim || '').trim();
+  if (!cleanClaim) {
+    return {
+      claim,
+      status: 'unsupported_or_contradicted',
+      confidenceScore: 0,
+      relevantPassages: [],
+      explanation: 'Empty claim cannot be verified.',
+    };
+  }
+
+  const retrieved = retrieveWithMultiQueryRRF(index, cleanClaim, 3, 1);
+  if (retrieved.length === 0) {
+    return {
+      claim: cleanClaim,
+      status: 'unsupported_or_contradicted',
+      confidenceScore: 0.1,
+      relevantPassages: [],
+      explanation: 'No relevant video transcript passages discuss this claim.',
+    };
+  }
+
+  const claimTokens = tokenizeText(cleanClaim);
+  const bestPassage = retrieved[0];
+  const passageLower = bestPassage.expandedText.toLowerCase();
+
+  const tokenMatches = claimTokens.filter((t) => passageLower.includes(t));
+  const matchRatio = claimTokens.length > 0 ? tokenMatches.length / claimTokens.length : 0;
+
+  let status: ClaimVerification['status'] = 'unsupported_or_contradicted';
+  let confidenceScore = 0.2;
+  let explanation = 'The transcript mentions tangential words but does not substantiate this claim.';
+
+  if (matchRatio >= 0.7) {
+    status = 'strongly_supported';
+    confidenceScore = Math.min(0.98, 0.75 + matchRatio * 0.23);
+    explanation = `Directly corroborated by transcript passage around ${bestPassage.chunk.formattedStart}.`;
+  } else if (matchRatio >= 0.4) {
+    status = 'partially_supported';
+    confidenceScore = 0.65;
+    explanation = `Partially mentioned or paraphrased in the discussion around ${bestPassage.chunk.formattedStart}.`;
+  }
+
+  return {
+    claim: cleanClaim,
+    status,
+    confidenceScore,
+    relevantPassages: retrieved.map((p) => ({
+      timestamp: p.chunk.formattedStart,
+      text: p.expandedText.slice(0, 220),
+    })),
+    explanation,
+  };
+}

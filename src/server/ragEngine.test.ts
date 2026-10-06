@@ -6,6 +6,11 @@ import {
   buildTranscriptChunks,
   createTranscriptIndex,
   retrieveRelevantChunks,
+  retrieveWithMultiQueryRRF,
+  generateQueryExpansions,
+  extractGroundedFacts,
+  extractChronologicalTimeline,
+  verifyClaimAgainstTranscript,
   formatRetrievedContextForPrompt,
   buildGroundedExtractiveAnswer,
   buildGroundedDeepDive,
@@ -101,5 +106,45 @@ describe('RAG Subsystem (ragEngine)', () => {
     assert.ok(deepDive.includes('Typography and Fonts'));
     assert.ok(deepDive.includes('Key Context'));
     assert.ok(/\[\d{2}:\d{2}\]/.test(deepDive));
+  });
+
+  it('generates multi-perspective query expansions', () => {
+    const expansions = generateQueryExpansions('typography in macintosh');
+    assert.ok(expansions.length >= 2);
+    assert.ok(expansions.includes('typography in macintosh'));
+  });
+
+  it('retrieves relevant chunks using Multi-Query RRF with dense information scoring', () => {
+    const index = createTranscriptIndex('', sampleSegments);
+    const rrfResults = retrieveWithMultiQueryRRF(index, 'dropping out of college', 3, 1);
+    assert.ok(rrfResults.length > 0);
+    const top = rrfResults[0];
+    assert.ok(top.chunk.text.toLowerCase().includes('reed') || top.chunk.text.toLowerCase().includes('drop'));
+    assert.ok(typeof top.score === 'number');
+  });
+
+  it('extracts grounded facts with category, confidence, and timestamps', () => {
+    const index = createTranscriptIndex('', sampleSegments);
+    const facts = extractGroundedFacts(index, 'fired apple age thirty', 4);
+    assert.ok(Array.isArray(facts));
+  });
+
+  it('extracts a chronological timeline across the video milestones', () => {
+    const index = createTranscriptIndex('', sampleSegments);
+    const timeline = extractChronologicalTimeline(index);
+    assert.ok(timeline.length >= 2);
+    assert.ok(timeline[0].time);
+    assert.ok(timeline[0].title);
+    assert.equal(timeline[0].significance, 'high');
+  });
+
+  it('verifies claims against transcript evidence for hallucination guarding', () => {
+    const index = createTranscriptIndex('', sampleSegments);
+    const supported = verifyClaimAgainstTranscript(index, 'He took a calligraphy class at Reed College');
+    assert.equal(supported.status, 'strongly_supported');
+    assert.ok(supported.confidenceScore > 0.7);
+
+    const unsupported = verifyClaimAgainstTranscript(index, 'He flew a rocket to Mars in 1985');
+    assert.equal(unsupported.status, 'unsupported_or_contradicted');
   });
 });

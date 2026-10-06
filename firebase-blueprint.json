@@ -90,7 +90,7 @@
           "type": "string",
           "description": "Saved markdown summary, quote, or excerpt.",
           "minLength": 0,
-          "maxLength": 50000
+          "maxLength": 500000
         },
         "notes": {
           "type": "string",
@@ -157,7 +157,7 @@
           "type": "string",
           "description": "Full synthesized markdown summary with citations and notes.",
           "minLength": 1,
-          "maxLength": 50000
+          "maxLength": 500000
         },
         "createdAt": {
           "type": "string",

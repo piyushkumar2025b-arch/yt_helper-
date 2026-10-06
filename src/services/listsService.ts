@@ -88,7 +88,7 @@ const MAX_LIST_DESC_LEN = 500;
 const MAX_ITEM_TITLE_LEN = 300;
 const MAX_ITEM_URL_LEN = 1000;
 const MAX_ITEM_SUBTITLE_LEN = 300;
-const MAX_ITEM_CONTENT_LEN = 50000;
+const MAX_ITEM_CONTENT_LEN = 500000;
 const MAX_ITEM_NOTES_LEN = 5000;
 const MAX_VIDEO_ID_LEN = 64;
 const MAX_AUTHOR_LEN = 200;
@@ -521,8 +521,14 @@ export async function ensureCloudListExists(
 
   try {
     const listRef = doc(db, 'lists', targetListId);
-    const snap = await getDoc(listRef);
-    if (!snap.exists()) {
+    let isExisting = false;
+    try {
+      const snap = await getDoc(listRef);
+      isExisting = snap.exists();
+    } catch {
+      isExisting = false;
+    }
+    if (!isExisting) {
       const sanitized = sanitizeListPayload(
         user.uid,
         fallbackName,
@@ -997,9 +1003,15 @@ export async function saveSummaryToFirestore(input: {
 
     try {
       const summaryRef = doc(db, 'summaries', summaryId);
-      const snap = await getDoc(summaryRef);
+      let isExisting = false;
+      try {
+        const snap = await getDoc(summaryRef);
+        isExisting = snap.exists();
+      } catch {
+        isExisting = false;
+      }
 
-      if (snap.exists()) {
+      if (isExisting) {
         await updateDoc(summaryRef, {
           videoId: sanitized.videoId,
           videoUrl: sanitized.videoUrl,
