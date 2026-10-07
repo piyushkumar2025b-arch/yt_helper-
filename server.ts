@@ -5808,6 +5808,7 @@ Provide 4 to 6 takeaways and 8 to 14 terms.`;
     const configuredKeys = {
       GEMINI_API_KEY: Boolean(process.env.GEMINI_API_KEY),
       OPENROUTER_API_KEY: Boolean(process.env.OPENROUTER_API_KEY),
+      YOUTUBE_API_KEY: Boolean(process.env.YOUTUBE_API_KEY || GOOGLE_API_KEY),
       OPENAI_API_KEY: Boolean(process.env.OPENAI_API_KEY),
       ANTHROPIC_API_KEY: Boolean(process.env.ANTHROPIC_API_KEY),
       GROQ_API_KEY: Boolean(process.env.GROQ_API_KEY),

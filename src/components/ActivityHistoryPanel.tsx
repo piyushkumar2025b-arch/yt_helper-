@@ -118,6 +118,7 @@ export const ActivityHistoryPanel: React.FC<ActivityHistoryPanelProps> = ({
   onOpenVideoUrl,
   onOpenResearchQuery,
   onOpenWordLookup,
+  onOpenTechWordLookup,
 }) => {
   const themeConfig = APP_THEMES[currentTheme] || APP_THEMES.midnight;
 
@@ -527,16 +528,18 @@ export const ActivityHistoryPanel: React.FC<ActivityHistoryPanelProps> = ({
                           </button>
                         )}
 
-                        {cleanQuery && onOpenWordLookup && item.actionType === 'word_lookup' && (
-                          <button
-                            type="button"
-                            onClick={() => onOpenWordLookup(cleanQuery)}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-semibold bg-amber-500/15 text-amber-400 hover:bg-amber-500/25 cursor-pointer transition-colors"
-                          >
-                            <Globe className="w-2.5 h-2.5" />
-                            <span>Look Up Word</span>
-                          </button>
-                        )}
+                        {cleanQuery &&
+                          (onOpenWordLookup || onOpenTechWordLookup) &&
+                          item.actionType === 'word_lookup' && (
+                            <button
+                              type="button"
+                              onClick={() => (onOpenWordLookup || onOpenTechWordLookup)?.(cleanQuery)}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-semibold bg-amber-500/15 text-amber-400 hover:bg-amber-500/25 cursor-pointer transition-colors"
+                            >
+                              <Globe className="w-2.5 h-2.5" />
+                              <span>Look Up Word</span>
+                            </button>
+                          )}
 
                         {item.url && item.url.startsWith('http') && (
                           <a
