@@ -79,6 +79,14 @@ export function extractNGrams(words: string[], n: number): string[] {
   return ngrams;
 }
 
+export interface RagMetadataContext {
+  title?: string;
+  description?: string;
+  tags?: string[];
+  topicCategories?: string[];
+  topComments?: Array<{ author: string; text: string; likeCount?: number }>;
+}
+
 /**
  * Chunks segments or plain transcript into semantically coherent windows (120-220 words)
  * with overlapping boundaries to ensure no ideas are split across boundaries.
@@ -87,7 +95,8 @@ export function buildTranscriptChunks(
   rawTranscript: string,
   segments?: RagSegment[],
   targetWordsPerChunk = 160,
-  overlapWords = 35
+  overlapWords = 35,
+  metadataContext?: RagMetadataContext
 ): { chunks: TranscriptChunk[]; allSegments: RagSegment[] } {
   let segs: RagSegment[] = [];
 
@@ -181,6 +190,66 @@ export function buildTranscriptChunks(
     segIdx = Math.max(segIdx + 1, lookahead - stepBack);
   }
 
+  // If metadataContext is provided (e.g. YouTube Data API tags, topics, description, top comments),
+  // append contextual chunks to enrich multi-query retrieval and concept matching
+  if (metadataContext) {
+    const metaParts: string[] = [];
+    if (metadataContext.title) metaParts.push(`Title: ${metadataContext.title}`);
+    if (metadataContext.topicCategories && metadataContext.topicCategories.length > 0) {
+      metaParts.push(`Topics: ${metadataContext.topicCategories.join(', ')}`);
+    }
+    if (metadataContext.tags && metadataContext.tags.length > 0) {
+      metaParts.push(`Tags & Keywords: ${metadataContext.tags.slice(0, 25).join(', ')}`);
+    }
+    if (metadataContext.description) {
+      metaParts.push(`Description Overview: ${metadataContext.description.slice(0, 500)}`);
+    }
+
+    if (metaParts.length > 0) {
+      const metaText = `[Video Knowledge & Topic Taxonomy] ${metaParts.join('. ')}`;
+      const metaTokens = tokenizeText(metaText);
+      const metaTermMap = new Map<string, number>();
+      for (const t of metaTokens) {
+        metaTermMap.set(t, (metaTermMap.get(t) || 0) + 1);
+      }
+      chunks.push({
+        id: chunkId++,
+        startSec: 0,
+        endSec: Math.min(30, segs[0]?.start || 30),
+        formattedStart: '00:00',
+        formattedEnd: '00:30',
+        text: metaText,
+        terms: metaTermMap,
+        totalTerms: metaTokens.length,
+        segmentIndices: [0],
+      });
+    }
+
+    if (metadataContext.topComments && metadataContext.topComments.length > 0) {
+      const commentSummaries = metadataContext.topComments
+        .slice(0, 8)
+        .map((c) => `${c.author}: "${c.text.slice(0, 150)}"`)
+        .join(' | ');
+      const commentText = `[Audience Discussion Highlights & Key Timestamp Notes] ${commentSummaries}`;
+      const commentTokens = tokenizeText(commentText);
+      const commentTermMap = new Map<string, number>();
+      for (const t of commentTokens) {
+        commentTermMap.set(t, (commentTermMap.get(t) || 0) + 1);
+      }
+      chunks.push({
+        id: chunkId++,
+        startSec: 0,
+        endSec: 0,
+        formattedStart: '00:00',
+        formattedEnd: '00:00',
+        text: commentText,
+        terms: commentTermMap,
+        totalTerms: commentTokens.length,
+        segmentIndices: [],
+      });
+    }
+  }
+
   return { chunks, allSegments: segs };
 }
 
@@ -189,9 +258,10 @@ export function buildTranscriptChunks(
  */
 export function createTranscriptIndex(
   rawTranscript: string,
-  segments?: RagSegment[]
+  segments?: RagSegment[],
+  metadataContext?: RagMetadataContext
 ): TranscriptIndex {
-  const { chunks, allSegments } = buildTranscriptChunks(rawTranscript, segments);
+  const { chunks, allSegments } = buildTranscriptChunks(rawTranscript, segments, 160, 35, metadataContext);
   const totalChunks = chunks.length;
   const invertedIndex = new Map<string, Set<number>>();
   let totalLength = 0;

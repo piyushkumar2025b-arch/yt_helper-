@@ -294,9 +294,10 @@ export const ResearchVisualsPanel: React.FC<ResearchVisualsPanelProps> = ({
     consecutiveZeroAddsRef.current = 0;
 
     try {
-      const safeFetchJson = async (url: string) => {
+      const storedYtKey = typeof window !== 'undefined' ? localStorage.getItem('youtube_api_key') : null;
+      const safeFetchJson = async (url: string, headers?: Record<string, string>) => {
         try {
-          const r = await fetch(url, { signal: controller.signal });
+          const r = await fetch(url, { signal: controller.signal, headers });
           if (!r.ok) return { ok: false, data: {} };
           const d = await r.json().catch(() => ({}));
           return { ok: true, data: d };
@@ -304,6 +305,8 @@ export const ResearchVisualsPanel: React.FC<ResearchVisualsPanelProps> = ({
           return { ok: false, data: {} };
         }
       };
+
+      const ytHeaders = storedYtKey ? { 'x-youtube-api-key': storedYtKey } : undefined;
 
       const [acadRes, codeRes, commRes, podRes, webRes, imgRes, newsRes, booksRes, ytRes] =
         await Promise.all([
@@ -315,7 +318,7 @@ export const ResearchVisualsPanel: React.FC<ResearchVisualsPanelProps> = ({
           safeFetchJson(`/api/image-search?q=${encodeURIComponent(q)}&page=0`),
           safeFetchJson(`/api/news-search?q=${encodeURIComponent(q)}&page=0`),
           safeFetchJson(`/api/books-search?q=${encodeURIComponent(q)}&page=0`),
-          safeFetchJson(`/api/youtube-search?q=${encodeURIComponent(q)}&page=0`),
+          safeFetchJson(`/api/youtube-search?q=${encodeURIComponent(q)}&page=0`, ytHeaders),
         ]);
 
       if (controller.signal.aborted) return;
@@ -368,7 +371,9 @@ export const ResearchVisualsPanel: React.FC<ResearchVisualsPanelProps> = ({
     const nextPage = page + 1;
 
     try {
+      const storedYtKey = typeof window !== 'undefined' ? localStorage.getItem('youtube_api_key') : null;
       const ytTokenParam = ytNextPageToken ? `&pageToken=${encodeURIComponent(ytNextPageToken)}` : '';
+      const ytHeaders = storedYtKey ? { 'x-youtube-api-key': storedYtKey } : undefined;
       const [acadRes, codeRes, commRes, podRes, webRes, imgRes, newsRes, booksRes, ytRes] =
         await Promise.all([
           fetch(`/api/academic-search?q=${encodeURIComponent(activeQuery)}&page=${nextPage}`),
@@ -380,7 +385,8 @@ export const ResearchVisualsPanel: React.FC<ResearchVisualsPanelProps> = ({
           fetch(`/api/news-search?q=${encodeURIComponent(activeQuery)}&page=${nextPage}`),
           fetch(`/api/books-search?q=${encodeURIComponent(activeQuery)}&page=${nextPage}`),
           fetch(
-            `/api/youtube-search?q=${encodeURIComponent(activeQuery)}&page=${nextPage}${ytTokenParam}`
+            `/api/youtube-search?q=${encodeURIComponent(activeQuery)}&page=${nextPage}${ytTokenParam}`,
+            { headers: ytHeaders }
           ),
         ]);
 

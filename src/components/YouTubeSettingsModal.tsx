@@ -144,7 +144,7 @@ export const YouTubeSettingsModal: React.FC<YouTubeSettingsModalProps> = ({
               </a>
             </div>
             <p className={`text-[11px] ${themeConfig.textMuted}`}>
-              Used for YouTube metadata, video descriptions, live statistics, chapters extraction, and Google search.
+              Unlocks full YouTube Data API v3 power: live views/likes/comments stats, video tags &amp; topic taxonomy, audience discussions &amp; timestamp highlights, official caption tracks catalog, related presentations search, and playlist ingestion.
             </p>
             <div className="flex gap-2">
               <input

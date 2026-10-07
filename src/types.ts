@@ -55,6 +55,17 @@ export interface VideoMetadata {
   podcastFeedUrl?: string;
   episodes?: PodcastEpisodeItem[];
   selectedEpisodeIndex?: number;
+  // YouTube Data API v3 enriched metadata
+  description?: string;
+  publishedAt?: string;
+  viewCount?: number;
+  likeCount?: number;
+  commentCount?: number;
+  tags?: string[];
+  topicCategories?: string[];
+  definition?: 'hd' | 'sd' | string;
+  hasCaptions?: boolean;
+  channelId?: string;
 }
 
 export interface OpenRouterModel {
@@ -421,9 +432,37 @@ export interface TechWordEntry {
 export interface YouTubeCommentItem {
   id: string;
   author: string;
+  authorProfileImageUrl?: string;
   text: string;
   likeCount: number;
   publishedAt: string;
+  timestamps?: Array<{
+    seconds: number;
+    timeStr: string;
+    context: string;
+  }>;
+}
+
+export interface YouTubeCaptionTrack {
+  id: string;
+  language: string;
+  name: string;
+  trackKind: 'standard' | 'ASR' | string;
+  isDraft: boolean;
+  isAutoSynced?: boolean;
+  lastUpdated?: string;
+}
+
+export interface YouTubeChannelProfile {
+  id: string;
+  title: string;
+  description?: string;
+  customUrl?: string;
+  publishedAt?: string;
+  thumbnailUrl?: string;
+  subscriberCount?: number;
+  videoCount?: number;
+  viewCount?: number;
 }
 
 export interface CrucialTermItem {

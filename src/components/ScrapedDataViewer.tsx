@@ -36,17 +36,31 @@ export const ScrapedDataViewer: React.FC<ScrapedDataViewerProps> = ({
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [ytStats, setYtStats] = useState<any>(null);
   const [ytTags, setYtTags] = useState<string[]>([]);
+  const [ytTopics, setYtTopics] = useState<string[]>([]);
   const [ytComments, setYtComments] = useState<YouTubeCommentItem[]>([]);
+  const [ytTimestampHighlights, setYtTimestampHighlights] = useState<Array<{ seconds: number; timeStr: string; context: string; author: string }>>([]);
+  const [ytChannel, setYtChannel] = useState<any>(null);
+  const [ytContentDetails, setYtContentDetails] = useState<any>(null);
+  const [ytCaptionsList, setYtCaptionsList] = useState<any[]>([]);
 
   useEffect(() => {
     if (!videoId) return;
-    fetch(`/api/youtube-details?videoId=${encodeURIComponent(videoId)}`)
+    const storedKey = typeof window !== 'undefined' ? localStorage.getItem('youtube_api_key') : null;
+    const headers: Record<string, string> = {};
+    if (storedKey) headers['x-youtube-api-key'] = storedKey;
+
+    fetch(`/api/youtube-details?videoId=${encodeURIComponent(videoId)}`, { headers })
       .then((r) => r.json())
       .then((data) => {
         if (data.ok) {
           setYtStats(data.statistics || null);
           setYtTags(data.tags || []);
+          setYtTopics(data.topicCategories || []);
           setYtComments(data.comments || []);
+          setYtTimestampHighlights(data.timestampHighlights || []);
+          setYtChannel(data.channel || null);
+          setYtContentDetails(data.contentDetails || null);
+          setYtCaptionsList(data.captionsList || []);
         }
       })
       .catch(() => {});
@@ -319,8 +333,123 @@ export const ScrapedDataViewer: React.FC<ScrapedDataViewerProps> = ({
                   </div>
                 </>
               )}
+
+              {ytContentDetails && (
+                <>
+                  <div className="space-y-0.5">
+                    <span className={themeConfig.textMuted}>Quality &amp; Subtitles</span>
+                    <p className={`font-semibold uppercase ${themeConfig.textPrimary}`}>
+                      {ytContentDetails.definition || 'HD'} · {ytContentDetails.hasCaptions ? 'Captions Enabled' : 'No Official Captions'}
+                    </p>
+                  </div>
+                </>
+              )}
             </div>
+
+            {ytChannel && (
+              <div className={`flex items-center gap-3 p-3 rounded-lg border ${themeConfig.borderLight} bg-slate-500/5`}>
+                {ytChannel.thumbnailUrl && (
+                  <img src={ytChannel.thumbnailUrl} alt={ytChannel.title} className="w-10 h-10 rounded-full border border-slate-700/50" />
+                )}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className={`font-bold text-xs ${themeConfig.textPrimary}`}>{ytChannel.title}</span>
+                    {ytChannel.customUrl && <span className={`text-[10px] ${themeConfig.textMuted}`}>{ytChannel.customUrl}</span>}
+                  </div>
+                  <div className={`flex items-center gap-3 text-[11px] ${themeConfig.textMuted}`}>
+                    {typeof ytChannel.subscriberCount === 'number' && (
+                      <span>{ytChannel.subscriberCount.toLocaleString()} subscribers</span>
+                    )}
+                    {typeof ytChannel.videoCount === 'number' && (
+                      <span>· {ytChannel.videoCount.toLocaleString()} uploads</span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
           </section>
+
+          {/* Topics & Tags */}
+          {(ytTopics.length > 0 || ytTags.length > 0) && (
+            <section className="space-y-2.5">
+              <h3 className={`text-xs font-semibold uppercase tracking-wider ${themeConfig.textMuted}`}>
+                Topics &amp; Keywords (YouTube Data API v3)
+              </h3>
+              {ytTopics.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 items-center">
+                  <span className={`text-[11px] font-medium ${themeConfig.textMuted}`}>Topics:</span>
+                  {ytTopics.map((topic, i) => (
+                    <span
+                      key={i}
+                      className="px-2 py-0.5 text-[11px] font-medium rounded-full bg-indigo-500/10 text-indigo-300 border border-indigo-500/20"
+                    >
+                      {topic}
+                    </span>
+                  ))}
+                </div>
+              )}
+              {ytTags.length > 0 && (
+                <div className="flex flex-wrap gap-1 items-center">
+                  <span className={`text-[11px] font-medium ${themeConfig.textMuted}`}>Tags:</span>
+                  {ytTags.slice(0, 20).map((tag, i) => (
+                    <span
+                      key={i}
+                      className="px-1.5 py-0.5 text-[10.5px] rounded bg-slate-500/10 text-slate-300"
+                    >
+                      #{tag}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </section>
+          )}
+
+          {/* Audience Timestamp Highlights */}
+          {ytTimestampHighlights.length > 0 && (
+            <section className="space-y-3">
+              <h3 className={`text-xs font-semibold uppercase tracking-wider ${themeConfig.textMuted}`}>
+                Audience Timestamp Highlights ({ytTimestampHighlights.length})
+              </h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                {ytTimestampHighlights.slice(0, 8).map((ts, idx) => (
+                  <div
+                    key={idx}
+                    className={`p-2.5 rounded-lg border ${themeConfig.borderLight} bg-slate-500/5 space-y-1`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-mono text-emerald-400 font-bold bg-emerald-500/10 px-1.5 py-0.5 rounded text-[11px]">
+                        [{ts.timeStr}]
+                      </span>
+                      <span className={`text-[10px] ${themeConfig.textMuted}`}>{ts.author}</span>
+                    </div>
+                    <p className={`text-[11px] line-clamp-2 ${themeConfig.textSecondary}`}>{ts.context}</p>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* Official Caption Tracks Catalog */}
+          {ytCaptionsList.length > 0 && (
+            <section className="space-y-2">
+              <h3 className={`text-xs font-semibold uppercase tracking-wider ${themeConfig.textMuted}`}>
+                Registered Caption Tracks ({ytCaptionsList.length})
+              </h3>
+              <div className="flex flex-wrap gap-2 text-xs">
+                {ytCaptionsList.map((tr) => (
+                  <div
+                    key={tr.id}
+                    className={`px-2.5 py-1 rounded border ${themeConfig.borderLight} bg-slate-500/5 flex items-center gap-1.5 text-[11px]`}
+                  >
+                    <span className="font-medium text-slate-200">{tr.name}</span>
+                    <span className="text-[10px] text-amber-300 font-mono bg-amber-500/10 px-1 rounded">
+                      {tr.trackKind === 'ASR' ? 'Auto ASR' : 'Human Standard'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
 
           {ytComments.length > 0 && (
             <section className="space-y-3">

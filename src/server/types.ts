@@ -33,6 +33,10 @@ export interface YouTubeVideoSnippet {
   channelTitle?: string;
   channelId?: string;
   publishedAt?: string;
+  tags?: string[];
+  categoryId?: string;
+  defaultLanguage?: string;
+  defaultAudioLanguage?: string;
   thumbnails?: {
     default?: YouTubeVideoThumbnail;
     medium?: YouTubeVideoThumbnail;
@@ -47,11 +51,70 @@ export interface YouTubeVideoItem {
   snippet?: YouTubeVideoSnippet;
   contentDetails?: {
     duration?: string;
+    dimension?: string;
+    definition?: string;
+    caption?: string;
+    licensedContent?: boolean;
+  };
+  statistics?: {
+    viewCount?: string;
+    likeCount?: string;
+    favoriteCount?: string;
+    commentCount?: string;
+  };
+  topicDetails?: {
+    topicCategories?: string[];
   };
 }
 
 export interface YouTubeVideoListResponse {
   items?: YouTubeVideoItem[];
+}
+
+export interface YouTubeCommentItem {
+  id: string;
+  author: string;
+  authorProfileImageUrl?: string;
+  text: string;
+  likeCount: number;
+  publishedAt: string;
+  timestamps?: Array<{
+    seconds: number;
+    timeStr: string;
+    context: string;
+  }>;
+}
+
+export interface YouTubeCaptionTrack {
+  id: string;
+  language: string;
+  name: string;
+  trackKind: 'standard' | 'ASR' | string;
+  isDraft: boolean;
+  isAutoSynced?: boolean;
+  lastUpdated?: string;
+}
+
+export interface YouTubeChannelProfile {
+  id: string;
+  title: string;
+  description?: string;
+  customUrl?: string;
+  publishedAt?: string;
+  thumbnailUrl?: string;
+  subscriberCount?: number;
+  videoCount?: number;
+  viewCount?: number;
+}
+
+export function parseIso8601Duration(duration?: string): number {
+  if (!duration || typeof duration !== 'string') return 0;
+  const match = duration.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/i);
+  if (!match) return 0;
+  const hours = parseInt(match[1] || '0', 10);
+  const minutes = parseInt(match[2] || '0', 10);
+  const seconds = parseInt(match[3] || '0', 10);
+  return hours * 3600 + minutes * 60 + seconds;
 }
 
 export interface TranscriptRequestBody {
