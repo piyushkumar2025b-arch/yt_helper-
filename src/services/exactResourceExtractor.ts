@@ -244,10 +244,87 @@ export function extractExactVideoResources(
     });
   }
 
-  // 3. Extract Explicit HTTP/HTTPS Links from Transcript or Summary
+  // 3. Extract Explicit HTTP/HTTPS Links, GitHub Repos, and arXiv Papers from Transcript or Summary
+  const ghRepoRegex = /github\.com\/([a-zA-Z0-9_.-]+)\/([a-zA-Z0-9_.-]+)/gi;
+  let ghMatch: RegExpExecArray | null;
+  while ((ghMatch = ghRepoRegex.exec(combinedCorpus)) !== null) {
+    const owner = ghMatch[1];
+    const repo = ghMatch[2].replace(/[.,;:)>\]"']+$/, '');
+    if (owner && repo && !['trending', 'features', 'pricing', 'about'].includes(owner)) {
+      const repoUrl = `https://github.com/${owner}/${repo}`;
+      const repoSeg = findMatchingSegment(segments, new RegExp(`${owner}|${repo}`, 'i'));
+      addResource({
+        id: `exact-gh-${owner}-${repo}`.toLowerCase(),
+        title: `${owner}/${repo} (Open-Source GitHub Repository)`,
+        type: 'Open Source Code / Tool',
+        description: `Mentioned GitHub repository for source code, implementation, and documentation.`,
+        exactQuote: repoSeg.quote,
+        timestampSeconds: repoSeg.timestampSeconds,
+        formattedTime: repoSeg.formattedTime,
+        primaryUrl: repoUrl,
+        primaryLabel: 'View on GitHub',
+        authorOrCreator: owner,
+        verified: true,
+        secondaryLinks: [
+          { label: 'GitHub Stars & Forks', url: repoUrl, sourceName: 'GitHub' },
+          { label: 'Search Issues & PRs', url: `${repoUrl}/issues`, sourceName: 'GitHub' },
+        ],
+      });
+    }
+  }
+
+  // 3b. Extract Mentioned arXiv IDs (e.g. arXiv:1706.03762 or 2301.12345)
+  const arxivRegex = /arxiv(?::|\.org\/abs\/|\.org\/pdf\/)\s*(\d{4}\.\d{4,5}(?:v\d+)?)/gi;
+  let arxMatch: RegExpExecArray | null;
+  while ((arxMatch = arxivRegex.exec(combinedCorpus)) !== null) {
+    const arxId = arxMatch[1];
+    const arxSeg = findMatchingSegment(segments, new RegExp(arxId, 'i'));
+    addResource({
+      id: `exact-arxiv-${arxId}`.toLowerCase(),
+      title: `arXiv Preprint (${arxId})`,
+      type: 'Research Paper',
+      description: `Primary research paper or preprint hosted on arXiv.`,
+      exactQuote: arxSeg.quote,
+      timestampSeconds: arxSeg.timestampSeconds,
+      formattedTime: arxSeg.formattedTime,
+      primaryUrl: `https://arxiv.org/abs/${arxId}`,
+      primaryLabel: `Read arXiv:${arxId}`,
+      verified: true,
+      secondaryLinks: [
+        { label: 'PDF Full Text', url: `https://arxiv.org/pdf/${arxId}.pdf`, sourceName: 'arXiv PDF' },
+        { label: 'Semantic Scholar Citations', url: `https://www.semanticscholar.org/search?q=${arxId}`, sourceName: 'Semantic Scholar' },
+      ],
+    });
+  }
+
+  // 3c. Extract Mentioned RFC Standards (e.g. RFC 9110, RFC 6455)
+  const rfcRegex = /\bRFC\s*([0-9]{3,5})\b/gi;
+  let rfcMatch: RegExpExecArray | null;
+  while ((rfcMatch = rfcRegex.exec(combinedCorpus)) !== null) {
+    const rfcNum = rfcMatch[1];
+    const rfcSeg = findMatchingSegment(segments, new RegExp(`RFC\\s*${rfcNum}`, 'i'));
+    addResource({
+      id: `exact-rfc-${rfcNum}`,
+      title: `IETF RFC ${rfcNum} (Internet Standard)`,
+      type: 'Technical Specification',
+      description: `Official Internet Engineering Task Force (IETF) Request for Comments standard specification.`,
+      exactQuote: rfcSeg.quote,
+      timestampSeconds: rfcSeg.timestampSeconds,
+      formattedTime: rfcSeg.formattedTime,
+      primaryUrl: `https://www.rfc-editor.org/rfc/rfc${rfcNum}.html`,
+      primaryLabel: `Open RFC ${rfcNum} Official Spec`,
+      authorOrCreator: 'IETF (Internet Engineering Task Force)',
+      verified: true,
+      secondaryLinks: [
+        { label: 'Datatracker Tracker', url: `https://datatracker.ietf.org/doc/rfc${rfcNum}/`, sourceName: 'IETF Datatracker' },
+      ],
+    });
+  }
+
+  // 3d. Extract Explicit HTTP/HTTPS Links from Transcript or Summary
   const urlRegex = /https?:\/\/[^\s)>\]"']+/gi;
   const rawUrls = Array.from(new Set(combinedCorpus.match(urlRegex) || [])).filter(
-    (u) => isSafeHttpUrl(u) && !u.includes('youtube.com/watch') && !u.includes('youtu.be/') && !u.includes('ytimg.com')
+    (u) => isSafeHttpUrl(u) && !u.includes('youtube.com/watch') && !u.includes('youtu.be/') && !u.includes('ytimg.com') && !u.includes('github.com/') && !u.includes('arxiv.org/')
   );
   for (const foundUrl of rawUrls.slice(0, 6)) {
     try {

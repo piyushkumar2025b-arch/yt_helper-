@@ -3249,6 +3249,7 @@ ${transcript.slice(0, 120000)}
           | 'Crossref'
           | 'PubMed'
           | 'Europe PMC'
+          | 'bioRxiv / medRxiv'
           | 'DOAJ'
           | 'CORE'
           | 'DBLP'
@@ -3499,6 +3500,41 @@ ${transcript.slice(0, 120000)}
               });
             }
           }
+        })(),
+
+        // 6b. bioRxiv & medRxiv Open Science Preprints via Europe PMC
+        (async () => {
+          if (page > 2) return;
+          try {
+            const bioUrl = `https://www.ebi.ac.uk/europepmc/webservices/rest/search?query=SRC:PPR%20AND%20${encodeURIComponent(
+              q
+            )}&format=json&pageSize=5&page=${page + 1}`;
+            const bioRes = await fetch(bioUrl, { signal: AbortSignal.timeout(4500) });
+            if (bioRes.ok) {
+              const bioData = (await bioRes.json()) as any;
+              for (const item of bioData.resultList?.result || []) {
+                if (!item.title) continue;
+                const pub = item.bookOrReportDetails?.publisher || 'bioRxiv / medRxiv';
+                const authors = item.authorString
+                  ? String(item.authorString)
+                      .split(',')
+                      .map((s: string) => s.trim())
+                      .filter(Boolean)
+                      .slice(0, 4)
+                  : ['Preprint Author'];
+                papers.push({
+                  id: `bio-${item.id || Math.random().toString(36).slice(2, 8)}`,
+                  title: String(item.title).replace(/<[^>]+>/g, ''),
+                  authors,
+                  year: item.pubYear,
+                  venue: `${pub} Preprint`,
+                  url: item.doi ? `https://doi.org/${item.doi}` : `https://europepmc.org/article/PPR/${item.id}`,
+                  doi: item.doi,
+                  source: 'bioRxiv / medRxiv',
+                });
+              }
+            }
+          } catch {}
         })(),
 
         // 7. DOAJ (Directory of Open Access Journals) API (6 open-access articles per page)
@@ -4413,6 +4449,8 @@ ${transcript.slice(0, 120000)}
         ownerAvatar?: string;
         source:
           | 'GitHub'
+          | 'GitLab'
+          | 'crates.io'
           | 'HuggingFace Model'
           | 'HuggingFace Dataset'
           | 'HuggingFace Space'
@@ -4451,6 +4489,70 @@ ${transcript.slice(0, 120000)}
               });
             }
           }
+        })(),
+
+        // 1b. GitLab Public Projects API
+        (async () => {
+          if (page > 2) return;
+          try {
+            const glUrl = `https://gitlab.com/api/v4/projects?search=${encodeURIComponent(q)}&per_page=6&order_by=similarity`;
+            const glRes = await fetch(glUrl, {
+              headers: { 'User-Agent': 'OpenTranscriptAI/1.0' },
+              signal: AbortSignal.timeout(4000),
+            });
+            if (glRes.ok) {
+              const glData = (await glRes.json()) as any[];
+              if (Array.isArray(glData)) {
+                for (const proj of glData) {
+                  if (!proj.name) continue;
+                  repos.push({
+                    id: `gl-${proj.id}`,
+                    name: proj.name,
+                    fullName: proj.path_with_namespace || proj.name_with_namespace || proj.name,
+                    description: proj.description || `Open-source GitLab project (${proj.name})`,
+                    url: proj.web_url,
+                    stars: proj.star_count || 0,
+                    forks: proj.forks_count || 0,
+                    language: 'GitLab Repo',
+                    topics: Array.isArray(proj.topics) ? proj.topics.slice(0, 4) : [],
+                    updatedAt: proj.last_activity_at,
+                    ownerAvatar: proj.avatar_url || undefined,
+                    source: 'GitLab',
+                  });
+                }
+              }
+            }
+          } catch {}
+        })(),
+
+        // 1c. crates.io Rust Package Registry API
+        (async () => {
+          if (page > 2) return;
+          try {
+            const crUrl = `https://crates.io/api/v1/crates?q=${encodeURIComponent(q)}&per_page=5`;
+            const crRes = await fetch(crUrl, {
+              headers: { 'User-Agent': 'OpenTranscriptAI/1.0 (research-client)' },
+              signal: AbortSignal.timeout(4000),
+            });
+            if (crRes.ok) {
+              const crData = (await crRes.json()) as any;
+              for (const c of (crData.crates || []).slice(0, 5)) {
+                if (!c.name) continue;
+                repos.push({
+                  id: `crate-${c.name}`,
+                  name: c.name,
+                  fullName: `crates.io/${c.name}@${c.max_version || 'latest'}`,
+                  description: c.description || `Rust package on crates.io with ${(c.downloads || 0).toLocaleString()} downloads`,
+                  url: c.repository || `https://crates.io/crates/${c.name}`,
+                  stars: c.downloads || 0,
+                  language: 'Rust (crates.io)',
+                  topics: Array.isArray(c.categories) ? c.categories.slice(0, 3) : [],
+                  updatedAt: c.updated_at,
+                  source: 'crates.io',
+                });
+              }
+            }
+          } catch {}
         })(),
 
         // 2. HuggingFace Hub Models API (uses HUGGINGFACE_API_KEY if configured)
@@ -4634,6 +4736,8 @@ ${transcript.slice(0, 120000)}
         source:
           | 'StackOverflow'
           | 'StackExchange'
+          | 'CS StackExchange'
+          | 'MathOverflow'
           | 'Reddit'
           | 'DEV.to'
           | 'Hacker News'
@@ -4794,6 +4898,72 @@ ${transcript.slice(0, 120000)}
           }
         })(),
 
+        // 5b. Computer Science StackExchange Q&A API
+        (async () => {
+          if (page > 2) return;
+          try {
+            const csUrl = `https://api.stackexchange.com/2.3/search/advanced?order=desc&sort=relevance&q=${encodeURIComponent(
+              q
+            )}&site=cs&pagesize=5&page=${page + 1}`;
+            const csRes = await fetch(csUrl, { signal: AbortSignal.timeout(4000) });
+            if (csRes.ok) {
+              const csData = (await csRes.json()) as any;
+              for (const item of csData.items || []) {
+                if (!item.title) continue;
+                discussions.push({
+                  id: `se-cs-${item.question_id}`,
+                  title: String(item.title)
+                    .replace(/&quot;/g, '"')
+                    .replace(/&#39;/g, "'")
+                    .replace(/&amp;/g, '&'),
+                  snippet: `Computer Science Theory & Systems Q&A (${item.answer_count || 0} answers).`,
+                  url: item.link,
+                  author: item.owner?.display_name || 'CS Theorist',
+                  community: 'cs.stackexchange.com',
+                  score: item.score || 0,
+                  commentsCount: item.answer_count || 0,
+                  isAnswered: item.is_answered,
+                  tags: Array.isArray(item.tags) ? item.tags.slice(0, 4) : [],
+                  source: 'CS StackExchange',
+                });
+              }
+            }
+          } catch {}
+        })(),
+
+        // 5c. MathOverflow Research Mathematics Q&A API
+        (async () => {
+          if (page > 2) return;
+          try {
+            const moUrl = `https://api.stackexchange.com/2.3/search/advanced?order=desc&sort=relevance&q=${encodeURIComponent(
+              q
+            )}&site=mathoverflow&pagesize=4&page=${page + 1}`;
+            const moRes = await fetch(moUrl, { signal: AbortSignal.timeout(4000) });
+            if (moRes.ok) {
+              const moData = (await moRes.json()) as any;
+              for (const item of moData.items || []) {
+                if (!item.title) continue;
+                discussions.push({
+                  id: `se-mo-${item.question_id}`,
+                  title: String(item.title)
+                    .replace(/&quot;/g, '"')
+                    .replace(/&#39;/g, "'")
+                    .replace(/&amp;/g, '&'),
+                  snippet: `Research Mathematics & Theoretical Foundations on MathOverflow.`,
+                  url: item.link,
+                  author: item.owner?.display_name || 'Mathematician',
+                  community: 'MathOverflow',
+                  score: item.score || 0,
+                  commentsCount: item.answer_count || 0,
+                  isAnswered: item.is_answered,
+                  tags: Array.isArray(item.tags) ? item.tags.slice(0, 4) : [],
+                  source: 'MathOverflow',
+                });
+              }
+            }
+          } catch {}
+        })(),
+
         // 6. GitHub Engineering Issues & Technical Discussions API
         (async () => {
           const ghHeaders: Record<string, string> = {
@@ -4865,6 +5035,7 @@ ${transcript.slice(0, 120000)}
           | 'Zenodo Dataset'
           | 'Internet Archive'
           | 'Library of Congress'
+          | 'World Bank Open Data'
           | 'Wikimedia Commons Audio';
       }> = [];
 
@@ -5018,6 +5189,38 @@ ${transcript.slice(0, 120000)}
               });
             }
           }
+        })(),
+
+        // 5. World Bank Open Data & Global Development Indicators API
+        (async () => {
+          if (page > 2) return;
+          try {
+            const wbUrl = `https://api.worldbank.org/v2/indicator?format=json&per_page=6&page=${page + 1}`;
+            const wbRes = await fetch(wbUrl, { signal: AbortSignal.timeout(4000) });
+            if (wbRes.ok) {
+              const wbData = (await wbRes.json()) as any[];
+              const indicators = Array.isArray(wbData) && wbData.length > 1 ? wbData[1] : [];
+              const lowerQ = q.toLowerCase();
+              const matched = indicators.filter((ind: any) =>
+                ind.name && (ind.name.toLowerCase().includes(lowerQ) || (ind.sourceNote && ind.sourceNote.toLowerCase().includes(lowerQ)))
+              );
+              const listToUse = matched.length > 0 ? matched : indicators.slice(0, 3);
+              for (const ind of listToUse.slice(0, 4)) {
+                if (!ind.name) continue;
+                items.push({
+                  id: `wb-${ind.id}`,
+                  title: `${ind.name} (World Bank Open Dataset)`,
+                  creator: ind.source?.value || 'World Bank Open Data',
+                  description: ind.sourceNote
+                    ? String(ind.sourceNote).slice(0, 260)
+                    : 'Global developmental, economic, and demographic dataset from the World Bank.',
+                  url: `https://data.worldbank.org/indicator/${ind.id}`,
+                  durationOrSize: 'Open Dataset',
+                  category: 'World Bank Open Data',
+                });
+              }
+            }
+          } catch {}
         })(),
       ]);
 
@@ -5838,14 +6041,14 @@ Provide 4 to 6 takeaways and 8 to 14 terms.`;
 
     res.json({
       ok: true,
-      totalEngines: 55,
+      totalEngines: 70,
       configuredKeys,
       categories: {
         aiModels: ['Google Gemini', 'OpenRouter', 'OpenAI GPT-4o', 'Anthropic Claude 3.5', 'Groq LPU'],
-        academic: ['OpenAlex', 'Semantic Scholar', 'arXiv', 'Crossref DOI', 'PubMed NCBI', 'Europe PMC', 'DOAJ', 'CORE.ac.uk', 'DBLP CS', 'HAL Open Science'],
-        codeAndAi: ['GitHub REST API', 'HuggingFace Models', 'HuggingFace Datasets', 'HuggingFace Spaces', 'npm Registry', 'PyPI Python Index'],
-        community: ['StackOverflow v2.3', 'CrossValidated SE', 'Reddit JSON API', 'DEV.to Articles', 'Hacker News Algolia', 'GitHub Discussions'],
-        mediaAndData: ['YouTube Data API v3', 'Apple iTunes Podcasts', 'Listen Notes Podcasts', 'CERN Zenodo Datasets', 'Internet Archive', 'Library of Congress'],
+        academic: ['OpenAlex', 'Semantic Scholar', 'arXiv', 'Crossref DOI', 'PubMed NCBI', 'Europe PMC', 'bioRxiv / medRxiv', 'DOAJ', 'CORE.ac.uk', 'DBLP CS', 'HAL Open Science'],
+        codeAndAi: ['GitHub REST API', 'GitLab Public Projects', 'crates.io Rust', 'HuggingFace Models', 'HuggingFace Datasets', 'HuggingFace Spaces', 'npm Registry', 'PyPI Python Index'],
+        community: ['StackOverflow v2.3', 'CrossValidated SE', 'CS StackExchange', 'MathOverflow', 'Reddit JSON API', 'DEV.to Articles', 'Hacker News Algolia', 'GitHub Discussions'],
+        mediaAndData: ['YouTube Data API v3', 'Apple iTunes Podcasts', 'Listen Notes Podcasts', 'CERN Zenodo Datasets', 'Internet Archive', 'Library of Congress', 'World Bank Open Data'],
         booksAndWeb: ['Google Books', 'OpenLibrary', 'Project Gutenberg (Gutendex)', 'Internet Archive Texts', 'Google Custom Search', 'Tavily AI Search', 'Serper.dev', 'Brave Search', 'Exa Neural Search', 'Wikipedia', 'Wikidata', 'DuckDuckGo', 'Free Dictionary', 'Datamuse'],
         newsAndVisuals: ['Google News', 'NewsAPI.org', 'GNews.io', 'The Guardian', 'New York Times', 'Unsplash', 'Pexels', 'Pixabay', 'Openverse CC', 'Wikimedia Commons'],
         speechAndTranslation: ['Microsoft Edge Neural TTS (WordBoundary)', 'Gemini 2.5 Flash TTS', 'ElevenLabs TTS', 'DeepL Neural Translate', 'Google Neural Translate GTX'],

@@ -1182,10 +1182,10 @@ export const SummaryViewer: React.FC<SummaryViewerProps> = ({
                 type="button"
                 onClick={onOpenResearch}
                 className="flex items-center gap-1 px-1.5 py-0.5 rounded font-semibold bg-indigo-500/15 text-indigo-400 hover:bg-indigo-500/25 transition-colors cursor-pointer whitespace-nowrap"
-                title="Explore 55+ live research sources, academic papers, books, GitHub repos, and figures"
+                title="Explore 70+ live research sources, academic papers, books, GitHub repos, and figures"
               >
                 <Globe className="w-3 h-3" />
-                <span>55+ Sources</span>
+                <span>70+ Sources</span>
               </button>
             )}
 
@@ -1802,7 +1802,7 @@ export const SummaryViewer: React.FC<SummaryViewerProps> = ({
                     className={`inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs font-semibold bg-indigo-500/15 text-indigo-400 hover:bg-indigo-500/25 cursor-pointer transition-colors`}
                   >
                     <Globe className="w-3.5 h-3.5" />
-                    <span>Open 55+ Live Research Sources →</span>
+                    <span>Open 70+ Live Research Sources →</span>
                   </button>
                 )}
               </div>

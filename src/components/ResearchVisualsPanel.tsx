@@ -346,7 +346,7 @@ export const ResearchVisualsPanel: React.FC<ResearchVisualsPanelProps> = ({
           actionType: 'search',
           title: `Multi-Source Research Search: ${q}`,
           query: q,
-          details: `Searched 55+ academic, web, book, code & news sources for "${q}" (${totalFound}+ primary results).`,
+          details: `Searched 70+ academic, web, book, code & news sources for "${q}" (${totalFound}+ primary results).`,
           videoId: videoMetadata?.videoId || '',
           videoTitle,
         }).catch(() => {});
@@ -658,12 +658,36 @@ export const ResearchVisualsPanel: React.FC<ResearchVisualsPanelProps> = ({
       url: `https://arxiv.org/search/?query=${encodeURIComponent(currentLookupTerm)}&searchtype=all`,
     },
     {
+      name: 'bioRxiv Preprints',
+      url: `https://www.biorxiv.org/search/${encodeURIComponent(currentLookupTerm)}`,
+    },
+    {
+      name: 'Europe PMC',
+      url: `https://europepmc.org/search?query=${encodeURIComponent(currentLookupTerm)}`,
+    },
+    {
       name: 'Connected Papers',
       url: `https://www.connectedpapers.com/search?q=${encodeURIComponent(currentLookupTerm)}`,
     },
     {
-      name: 'Consensus AI',
-      url: `https://consensus.app/results/?q=${encodeURIComponent(currentLookupTerm)}`,
+      name: 'GitHub Code',
+      url: `https://github.com/search?q=${encodeURIComponent(currentLookupTerm)}&type=repositories`,
+    },
+    {
+      name: 'GitLab',
+      url: `https://gitlab.com/search?search=${encodeURIComponent(currentLookupTerm)}`,
+    },
+    {
+      name: 'crates.io',
+      url: `https://crates.io/search?q=${encodeURIComponent(currentLookupTerm)}`,
+    },
+    {
+      name: 'HuggingFace Hub',
+      url: `https://huggingface.co/search/full-text?q=${encodeURIComponent(currentLookupTerm)}`,
+    },
+    {
+      name: 'Papers With Code',
+      url: `https://paperswithcode.com/search?q=${encodeURIComponent(currentLookupTerm)}`,
     },
     {
       name: 'OpenLibrary',
@@ -678,24 +702,16 @@ export const ResearchVisualsPanel: React.FC<ResearchVisualsPanelProps> = ({
       url: `https://archive.org/search?query=${encodeURIComponent(currentLookupTerm)}`,
     },
     {
-      name: 'WorldCat Books',
-      url: `https://search.worldcat.org/search?q=${encodeURIComponent(currentLookupTerm)}`,
+      name: 'World Bank Data',
+      url: `https://data.worldbank.org/indicator?tab=all&search=${encodeURIComponent(currentLookupTerm)}`,
     },
     {
-      name: 'GitHub Code',
-      url: `https://github.com/search?q=${encodeURIComponent(currentLookupTerm)}&type=repositories`,
+      name: 'CERN Zenodo',
+      url: `https://zenodo.org/search?q=${encodeURIComponent(currentLookupTerm)}`,
     },
     {
-      name: 'HuggingFace Hub',
-      url: `https://huggingface.co/search/full-text?q=${encodeURIComponent(currentLookupTerm)}`,
-    },
-    {
-      name: 'Papers With Code',
-      url: `https://paperswithcode.com/search?q=${encodeURIComponent(currentLookupTerm)}`,
-    },
-    {
-      name: 'PyPI Python',
-      url: `https://pypi.org/search/?q=${encodeURIComponent(currentLookupTerm)}`,
+      name: 'StackOverflow',
+      url: `https://stackoverflow.com/search?q=${encodeURIComponent(currentLookupTerm)}`,
     },
     {
       name: 'Wikipedia',
@@ -718,7 +734,7 @@ export const ResearchVisualsPanel: React.FC<ResearchVisualsPanelProps> = ({
         <div className="flex flex-wrap items-center justify-between gap-2.5">
           <div className="space-y-0.5">
             <h2 className={`text-sm sm:text-base font-bold tracking-tight ${themeConfig.textPrimary}`}>
-              Exact Video Resources &amp; 55+ Live Research Sources
+              Exact Video Resources &amp; 70+ Live Research Sources
             </h2>
             <p className={`text-[11px] ${themeConfig.textMuted}`}>
               Explore exact books, papers, datasets, and timestamped mentions from this video—plus live academic, code, book, podcast, and community sources.
@@ -893,7 +909,7 @@ export const ResearchVisualsPanel: React.FC<ResearchVisualsPanelProps> = ({
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search across 55+ sources: papers, books, GitHub, HuggingFace, PyPI, Reddit, LOC..."
+                placeholder="Search across 70+ sources: papers, books, GitHub, GitLab, crates.io, HuggingFace, PyPI, Reddit, LOC..."
                 className={`w-full pl-8 pr-3 py-1.5 text-xs rounded bg-slate-500/10 ${themeConfig.textPrimary} placeholder:opacity-40 focus:outline-none`}
               />
             </div>
@@ -1073,7 +1089,7 @@ export const ResearchVisualsPanel: React.FC<ResearchVisualsPanelProps> = ({
         <div className="py-16 text-center space-y-3">
           <Loader2 className="w-6 h-6 animate-spin mx-auto text-indigo-400" />
           <p className={`text-xs ${themeConfig.textMuted}`}>
-            Querying 55+ live research, book, code, Q&amp;A, podcast, archive, and academic APIs for &ldquo;{searchQuery}&rdquo;...
+            Querying 70+ live research, book, code, Q&amp;A, podcast, archive, and academic APIs for &ldquo;{searchQuery}&rdquo;...
           </p>
         </div>
       )}
@@ -1191,7 +1207,7 @@ export const ResearchVisualsPanel: React.FC<ResearchVisualsPanelProps> = ({
                             type="button"
                             onClick={() => handleSelectChip(res.title)}
                             className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-slate-500/10 ${themeConfig.textSecondary} hover:${themeConfig.textPrimary} cursor-pointer`}
-                            title="Search all 55+ live sources for this exact resource"
+                            title="Search all 70+ live sources for this exact resource"
                           >
                             <Search className="w-2.5 h-2.5" />
                             <span>Deep Search</span>

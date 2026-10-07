@@ -252,6 +252,7 @@ export interface AcademicPaperResult {
     | 'Crossref'
     | 'PubMed'
     | 'Europe PMC'
+    | 'bioRxiv / medRxiv'
     | 'DOAJ'
     | 'CORE'
     | 'DBLP'
@@ -272,6 +273,8 @@ export interface GitHubRepoResult {
   ownerAvatar?: string;
   source:
     | 'GitHub'
+    | 'GitLab'
+    | 'crates.io'
     | 'HuggingFace Model'
     | 'HuggingFace Dataset'
     | 'HuggingFace Space'
@@ -294,6 +297,8 @@ export interface CommunityDiscussionResult {
   source:
     | 'StackOverflow'
     | 'StackExchange'
+    | 'CS StackExchange'
+    | 'MathOverflow'
     | 'Reddit'
     | 'DEV.to'
     | 'Hacker News'
@@ -316,6 +321,7 @@ export interface PodcastDatasetResult {
     | 'Zenodo Dataset'
     | 'Internet Archive'
     | 'Library of Congress'
+    | 'World Bank Open Data'
     | 'Wikimedia Commons Audio';
 }
 
@@ -329,6 +335,8 @@ export interface ExactVideoResource {
     | 'Person / Pioneer'
     | 'Organization / Lab'
     | 'Tool / Framework'
+    | 'Open Source Code / Tool'
+    | 'Technical Specification'
     | 'Dataset / Benchmark'
     | 'Historical / Key Reference'
     | 'Custom Resource';

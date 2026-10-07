@@ -7,7 +7,14 @@ export function buildKnowledgeSources(query: string): Array<{ label: string; url
     { label: 'Wiktionary', url: `https://en.wiktionary.org/wiki/Special:Search?search=${clean}` },
     { label: 'OpenAlex Research', url: `https://openalex.org/works?search=${clean}` },
     { label: 'Google Scholar', url: `https://scholar.google.com/scholar?q=${clean}` },
+    { label: 'Semantic Scholar', url: `https://www.semanticscholar.org/search?q=${clean}` },
+    { label: 'arXiv Preprints', url: `https://arxiv.org/search/?query=${clean}&searchtype=all` },
+    { label: 'PubMed NCBI', url: `https://pubmed.ncbi.nlm.nih.gov/?term=${clean}` },
+    { label: 'Internet Archive', url: `https://archive.org/search?query=${clean}` },
     { label: 'Wikidata Graph', url: `https://www.wikidata.org/w/index.php?search=${clean}` },
+    { label: 'GitHub Code', url: `https://github.com/search?q=${clean}&type=repositories` },
+    { label: 'StackOverflow QA', url: `https://stackoverflow.com/search?q=${clean}` },
+    { label: 'World Bank Open Data', url: `https://data.worldbank.org/indicator?tab=all&search=${clean}` },
   ];
 }
 
