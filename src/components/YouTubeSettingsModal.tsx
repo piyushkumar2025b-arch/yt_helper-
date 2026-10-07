@@ -64,19 +64,40 @@ export const YouTubeSettingsModal: React.FC<YouTubeSettingsModalProps> = ({
     setTestStatus('testing');
     setTestMessage('Validating key with YouTube Data API v3...');
     try {
-      const res = await fetch(
-        `https://www.googleapis.com/youtube/v3/videos?part=snippet&id=jNQXAC9IVRw&key=${encodeURIComponent(
-          keyToTest
-        )}`
-      );
-      const data = await res.json();
-      if (res.ok && data?.items?.length) {
+      let verified = false;
+      let videoTitle = '';
+
+      try {
+        const res = await fetch(
+          `https://www.googleapis.com/youtube/v3/videos?part=snippet&id=jNQXAC9IVRw&key=${encodeURIComponent(
+            keyToTest
+          )}`
+        );
+        const data = await res.json();
+        if (res.ok && data?.items?.length) {
+          verified = true;
+          videoTitle = data.items[0]?.snippet?.title || 'YouTube Video';
+        } else if (data?.error?.message) {
+          throw new Error(data.error.message);
+        }
+      } catch (directErr: any) {
+        // Fallback to testing via server route to bypass browser CORS or adblock
+        const proxyRes = await fetch(`/api/youtube-details?videoId=jNQXAC9IVRw`, {
+          headers: { 'x-youtube-api-key': keyToTest },
+        });
+        const proxyData = await proxyRes.json();
+        if (proxyRes.ok && proxyData?.ok) {
+          verified = true;
+          videoTitle = proxyData?.title || 'YouTube Video';
+        } else {
+          throw new Error(proxyData?.error || directErr?.message || 'Invalid API key or YouTube Data API v3 is not enabled.');
+        }
+      }
+
+      if (verified) {
         setTestStatus('success');
-        setTestMessage(`Key verified! Connected to YouTube Data API (${data.items[0]?.snippet?.title}).`);
+        setTestMessage(`Key verified! Connected to YouTube Data API (${videoTitle}).`);
         handleSave();
-      } else {
-        setTestStatus('error');
-        setTestMessage(data?.error?.message || 'Invalid API key or YouTube Data API v3 is not enabled.');
       }
     } catch (err: any) {
       setTestStatus('error');

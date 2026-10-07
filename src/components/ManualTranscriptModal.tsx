@@ -181,9 +181,15 @@ export const ManualTranscriptModal: React.FC<ManualTranscriptModalProps> = ({
 
     setIsFetchingUrl(true);
     try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      const storedKey = typeof window !== 'undefined' ? localStorage.getItem('youtube_api_key') : null;
+      if (storedKey) headers['x-youtube-api-key'] = storedKey;
+      const storedCookies = typeof window !== 'undefined' ? localStorage.getItem('youtube_cookies') : null;
+      if (storedCookies) headers['x-youtube-cookies'] = storedCookies;
+
       const res = await fetch('/api/transcript', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ url: trimmedUrl, title: titleInput.trim() || undefined }),
       });
       const data = await res.json().catch(() => ({}));

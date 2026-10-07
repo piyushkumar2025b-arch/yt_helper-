@@ -93,6 +93,8 @@ function isLikelyMediaUrlOrId(input: string): boolean {
   if (extractVideoId(trimmed) !== null) return true;
   if (/^https?:\/\//i.test(trimmed)) return true;
   if (/^[a-zA-Z0-9_-]{11}$/.test(trimmed)) return true;
+  if (/[?&]list=[a-zA-Z0-9_-]+/.test(trimmed)) return true;
+  if (/^(PL|UU|LL|RD|OLAK5uy_)[a-zA-Z0-9_-]{10,50}$/.test(trimmed)) return true;
   return false;
 }
 

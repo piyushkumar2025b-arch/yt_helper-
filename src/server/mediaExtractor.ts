@@ -73,6 +73,11 @@ export function detectMediaSourceType(urlOrInput: string): {
     return { type: 'youtube', id: trimmed, cleanUrl: `https://www.youtube.com/watch?v=${trimmed}` };
   }
 
+  // YouTube Playlist ID check
+  if (/^(PL|UU|LL|RD|OLAK5uy_)[a-zA-Z0-9_-]{10,50}$/.test(trimmed)) {
+    return { type: 'youtube', cleanUrl: `https://www.youtube.com/playlist?list=${trimmed}` };
+  }
+
   // If not a URL, check if it's raw text
   if (!/^https?:\/\//i.test(trimmed)) {
     return { type: 'direct_text', cleanUrl: '' };
@@ -82,6 +87,11 @@ export function detectMediaSourceType(urlOrInput: string): {
     const parsed = new URL(trimmed);
     const host = parsed.hostname.toLowerCase().replace(/^www\./, '');
     const pathname = parsed.pathname;
+
+    // YouTube URLs (playlist, channel, etc. when not caught by extractVideoId)
+    if (host === 'youtube.com' || host === 'youtu.be' || host === 'm.youtube.com') {
+      return { type: 'youtube', id: ytId || undefined, cleanUrl: trimmed };
+    }
 
     // 2. Vimeo
     if (host === 'vimeo.com' || host === 'player.vimeo.com') {

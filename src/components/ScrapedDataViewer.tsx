@@ -119,12 +119,13 @@ export const ScrapedDataViewer: React.FC<ScrapedDataViewerProps> = ({
   }, [segments]);
 
   const masterJson = useMemo(() => {
+    const activeId = resolvedVideoId || videoId || '';
     return {
       scrapedAt: new Date().toISOString(),
       videoTarget: {
-        id: videoId,
-        url: videoUrl || `https://www.youtube.com/watch?v=${videoId}`,
-        embedUrl: `https://www.youtube-nocookie.com/embed/${videoId}`,
+        id: activeId,
+        url: videoUrl || (activeId ? `https://www.youtube.com/watch?v=${activeId}` : ''),
+        embedUrl: activeId ? `https://www.youtube-nocookie.com/embed/${activeId}` : '',
         metadata: metadata || null,
         youtubeStatistics: ytStats,
         tags: ytTags,
@@ -147,7 +148,7 @@ export const ScrapedDataViewer: React.FC<ScrapedDataViewerProps> = ({
         imageResults,
       },
     };
-  }, [videoId, videoUrl, metadata, ytStats, ytTags, ytComments, segments, plainText, webResults, newsResults, imageResults]);
+  }, [resolvedVideoId, videoId, videoUrl, metadata, ytStats, ytTags, ytComments, segments, plainText, webResults, newsResults, imageResults]);
 
   const jsonString = useMemo(() => {
     return JSON.stringify(masterJson, null, 2);
@@ -170,6 +171,8 @@ export const ScrapedDataViewer: React.FC<ScrapedDataViewerProps> = ({
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
   };
+
+  const fileBaseName = resolvedVideoId || videoId || 'video';
 
   const wordCount = plainText.split(/\s+/).filter(Boolean).length;
   const durationLabel = segments.length > 0 ? segments[segments.length - 1].formattedTime : '00:00';
@@ -206,7 +209,7 @@ export const ScrapedDataViewer: React.FC<ScrapedDataViewerProps> = ({
 
             <button
               type="button"
-              onClick={() => handleDownload(`video-data-${videoId}.json`, jsonString, 'application/json')}
+              onClick={() => handleDownload(`video-data-${fileBaseName}.json`, jsonString, 'application/json')}
               className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded bg-teal-600 hover:bg-teal-500 text-white text-[11px] font-semibold cursor-pointer transition-colors whitespace-nowrap"
             >
               <Download className="w-3 h-3" />
@@ -244,7 +247,7 @@ export const ScrapedDataViewer: React.FC<ScrapedDataViewerProps> = ({
             {activeFormat === 'vtt' && (
               <button
                 type="button"
-                onClick={() => handleDownload(`subtitles-${videoId}.vtt`, vttText, 'text/vtt')}
+                onClick={() => handleDownload(`subtitles-${fileBaseName}.vtt`, vttText, 'text/vtt')}
                 className={`px-2 py-0.5 rounded text-[11px] font-medium ${themeConfig.textSecondary} hover:${themeConfig.textPrimary} bg-slate-500/10 hover:bg-slate-500/15 cursor-pointer transition-colors inline-flex items-center gap-1`}
               >
                 <Download className="w-3 h-3" />
@@ -254,7 +257,7 @@ export const ScrapedDataViewer: React.FC<ScrapedDataViewerProps> = ({
             {activeFormat === 'srt' && (
               <button
                 type="button"
-                onClick={() => handleDownload(`subtitles-${videoId}.srt`, srtText, 'application/x-subrip')}
+                onClick={() => handleDownload(`subtitles-${fileBaseName}.srt`, srtText, 'application/x-subrip')}
                 className={`px-2 py-0.5 rounded text-[11px] font-medium ${themeConfig.textSecondary} hover:${themeConfig.textPrimary} bg-slate-500/10 hover:bg-slate-500/15 cursor-pointer transition-colors inline-flex items-center gap-1`}
               >
                 <Download className="w-3 h-3" />
@@ -264,7 +267,7 @@ export const ScrapedDataViewer: React.FC<ScrapedDataViewerProps> = ({
             {activeFormat === 'text' && (
               <button
                 type="button"
-                onClick={() => handleDownload(`transcript-${videoId}.txt`, plainText, 'text/plain')}
+                onClick={() => handleDownload(`transcript-${fileBaseName}.txt`, plainText, 'text/plain')}
                 className={`px-2 py-0.5 rounded text-[11px] font-medium ${themeConfig.textSecondary} hover:${themeConfig.textPrimary} bg-slate-500/10 hover:bg-slate-500/15 cursor-pointer transition-colors inline-flex items-center gap-1`}
               >
                 <Download className="w-3 h-3" />
@@ -309,7 +312,7 @@ export const ScrapedDataViewer: React.FC<ScrapedDataViewerProps> = ({
 
               <div className="space-y-0.5">
                 <span className={themeConfig.textMuted}>Video ID</span>
-                <p className="font-mono tabular-nums text-slate-300">{videoId}</p>
+                <p className="font-mono tabular-nums text-slate-300">{resolvedVideoId || videoId || 'N/A'}</p>
               </div>
 
               <div className="space-y-0.5">
