@@ -173,7 +173,11 @@ export const SidebarMenu: React.FC<SidebarMenuProps> = ({
     setYtPage(0);
     setYtNextPageToken(null);
     try {
-      const res = await fetch(`/api/youtube-search?q=${encodeURIComponent(q)}&page=0`);
+      const storedKey = typeof window !== 'undefined' ? localStorage.getItem('youtube_api_key') : null;
+      const headers: Record<string, string> = {};
+      if (storedKey) headers['x-youtube-api-key'] = storedKey;
+
+      const res = await fetch(`/api/youtube-search?q=${encodeURIComponent(q)}&page=0`, { headers });
       const data = await res.json();
       if (!res.ok) {
         throw new Error(data.error || 'Failed to search YouTube.');
@@ -199,8 +203,12 @@ export const SidebarMenu: React.FC<SidebarMenuProps> = ({
     setIsLoadingMoreYt(true);
     const nextPage = ytPage + 1;
     try {
+      const storedKey = typeof window !== 'undefined' ? localStorage.getItem('youtube_api_key') : null;
+      const headers: Record<string, string> = {};
+      if (storedKey) headers['x-youtube-api-key'] = storedKey;
+
       const tokenParam = ytNextPageToken ? `&pageToken=${encodeURIComponent(ytNextPageToken)}` : '';
-      const res = await fetch(`/api/youtube-search?q=${encodeURIComponent(q)}&page=${nextPage}${tokenParam}`);
+      const res = await fetch(`/api/youtube-search?q=${encodeURIComponent(q)}&page=${nextPage}${tokenParam}`, { headers });
       const data = await res.json();
       if (res.ok && Array.isArray(data.videos) && data.videos.length > 0) {
         setYtResults((prev) => {
@@ -449,6 +457,32 @@ export const SidebarMenu: React.FC<SidebarMenuProps> = ({
                         }`}
                       >
                         {ep.title}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* YouTube Playlist Drawer if playlist videos exist */}
+              {metadata?.playlistVideos && metadata.playlistVideos.length > 1 && (
+                <div className={`mt-2 p-2 rounded-lg border ${themeConfig.borderLight} bg-slate-500/5 space-y-1.5`}>
+                  <div className="flex items-center justify-between text-[10px] font-semibold text-rose-400 uppercase tracking-wider">
+                    <span>Playlist Videos ({metadata.playlistVideos.length})</span>
+                  </div>
+                  <div className="max-h-36 overflow-y-auto space-y-1 pr-1">
+                    {metadata.playlistVideos.map((pVid, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => onSubmitUrl(pVid.url)}
+                        className={`w-full text-left p-1 rounded text-[10px] truncate block transition-colors cursor-pointer ${
+                          metadata.videoId === pVid.videoId
+                            ? 'bg-rose-600/30 text-rose-300 font-semibold'
+                            : 'hover:bg-slate-500/10 text-slate-300'
+                        }`}
+                        title={pVid.title}
+                      >
+                        {idx + 1}. {pVid.title}
                       </button>
                     ))}
                   </div>

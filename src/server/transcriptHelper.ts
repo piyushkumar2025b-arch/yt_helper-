@@ -693,8 +693,28 @@ export async function fetchPipedTranscript(
   }
 
   // 2. Try yt-dlp binary (handles auto-subs, multi-language, cookies if provided)
+  let subLangsOption: string | undefined = undefined;
+  if (context?.youtubeApiKey) {
+    try {
+      const capRes = await fetch(
+        `https://www.googleapis.com/youtube/v3/captions?part=snippet&videoId=${encodeURIComponent(videoId)}&key=${context.youtubeApiKey}`,
+        { signal: AbortSignal.timeout(3000) }
+      );
+      if (capRes.ok) {
+        const capData = (await capRes.json()) as any;
+        const langs = (capData.items || [])
+          .map((it: any) => it.snippet?.language)
+          .filter(Boolean);
+        if (langs.length > 0) {
+          subLangsOption = [...new Set(['en.*', 'en', ...langs, 'all'])].join(',');
+        }
+      }
+    } catch {}
+  }
+
   const ytDlpSegs = await fetchSubtitlesViaYtDlp(videoId, {
     cookies: context?.cookies,
+    subLangs: subLangsOption,
     timeoutMs: 12000,
   });
   if (ytDlpSegs && ytDlpSegs.length > 0) {

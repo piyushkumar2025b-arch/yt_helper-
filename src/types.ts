@@ -66,6 +66,15 @@ export interface VideoMetadata {
   definition?: 'hd' | 'sd' | string;
   hasCaptions?: boolean;
   channelId?: string;
+  playlistId?: string;
+  playlistTitle?: string;
+  playlistVideos?: Array<{
+    videoId: string;
+    title: string;
+    url: string;
+    thumbnailUrl?: string;
+    channelTitle?: string;
+  }>;
 }
 
 export interface OpenRouterModel {

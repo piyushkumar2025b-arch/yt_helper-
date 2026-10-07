@@ -32,11 +32,21 @@ export const ScrapedDataViewer: React.FC<ScrapedDataViewerProps> = ({
 }) => {
   const themeConfig = APP_THEMES[currentTheme] || APP_THEMES.midnight;
 
+  const resolvedVideoId = (videoId || metadata?.videoId || '').trim();
+
   const [activeFormat, setActiveFormat] = useState<'overview' | 'json' | 'vtt' | 'srt' | 'text'>('overview');
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
-  const [ytStats, setYtStats] = useState<any>(null);
-  const [ytTags, setYtTags] = useState<string[]>([]);
-  const [ytTopics, setYtTopics] = useState<string[]>([]);
+  const [ytStats, setYtStats] = useState<any>(
+    metadata?.viewCount !== undefined || metadata?.likeCount !== undefined
+      ? {
+          viewCount: metadata?.viewCount,
+          likeCount: metadata?.likeCount,
+          commentCount: metadata?.commentCount,
+        }
+      : null
+  );
+  const [ytTags, setYtTags] = useState<string[]>(metadata?.tags || []);
+  const [ytTopics, setYtTopics] = useState<string[]>(metadata?.topicCategories || []);
   const [ytComments, setYtComments] = useState<YouTubeCommentItem[]>([]);
   const [ytTimestampHighlights, setYtTimestampHighlights] = useState<Array<{ seconds: number; timeStr: string; context: string; author: string }>>([]);
   const [ytChannel, setYtChannel] = useState<any>(null);
@@ -44,12 +54,12 @@ export const ScrapedDataViewer: React.FC<ScrapedDataViewerProps> = ({
   const [ytCaptionsList, setYtCaptionsList] = useState<any[]>([]);
 
   useEffect(() => {
-    if (!videoId) return;
+    if (!resolvedVideoId) return;
     const storedKey = typeof window !== 'undefined' ? localStorage.getItem('youtube_api_key') : null;
     const headers: Record<string, string> = {};
     if (storedKey) headers['x-youtube-api-key'] = storedKey;
 
-    fetch(`/api/youtube-details?videoId=${encodeURIComponent(videoId)}`, { headers })
+    fetch(`/api/youtube-details?videoId=${encodeURIComponent(resolvedVideoId)}`, { headers })
       .then((r) => r.json())
       .then((data) => {
         if (data.ok) {
@@ -64,7 +74,7 @@ export const ScrapedDataViewer: React.FC<ScrapedDataViewerProps> = ({
         }
       })
       .catch(() => {});
-  }, [videoId]);
+  }, [resolvedVideoId]);
 
   const plainText = useMemo(() => {
     return segments.map((s) => s.text).join(' ');

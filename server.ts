@@ -430,6 +430,7 @@ async function startServer() {
           req.query?.youtubeApiKey ||
           ''
       ).trim();
+      const activeYoutubeKey = resolveYouTubeApiKey(req, clientYoutubeKey);
       const clientCookies = String(
         req.headers['x-youtube-cookies'] ||
           req.body?.cookies ||
@@ -574,7 +575,49 @@ async function startServer() {
         }
       }
 
-      const videoId = detected.type === 'youtube' ? (detected.id || extractVideoId(rawInput)) : extractVideoId(rawInput);
+      let playlistContext: { playlistId: string; playlistTitle?: string; videos: any[] } | null = null;
+      const listMatch = rawInput.match(/[?&]list=([a-zA-Z0-9_-]+)/) || (rawInput.startsWith('PL') && /^[a-zA-Z0-9_-]{18,40}$/.test(rawInput) ? [null, rawInput] : null);
+      if (listMatch) {
+        const playlistId = listMatch[1];
+        if (activeYoutubeKey) {
+          try {
+            const pRes = await fetch(
+              `https://www.googleapis.com/youtube/v3/playlistItems?part=snippet,contentDetails&maxResults=50&playlistId=${encodeURIComponent(playlistId)}&key=${activeYoutubeKey}`,
+              { signal: AbortSignal.timeout(6000) }
+            );
+            if (pRes.ok) {
+              const pData = (await pRes.json()) as any;
+              const videos = (pData.items || [])
+                .map((it: any) => {
+                  const vid = it.contentDetails?.videoId || it.snippet?.resourceId?.videoId;
+                  return {
+                    videoId: vid,
+                    title: it.snippet?.title || 'YouTube Video',
+                    url: `https://www.youtube.com/watch?v=${vid}`,
+                    thumbnailUrl:
+                      it.snippet?.thumbnails?.medium?.url ||
+                      it.snippet?.thumbnails?.default?.url ||
+                      `https://i.ytimg.com/vi/${vid}/mqdefault.jpg`,
+                    channelTitle: it.snippet?.videoOwnerChannelTitle || it.snippet?.channelTitle || '',
+                  };
+                })
+                .filter((v: any) => v.videoId && v.title !== 'Private video' && v.title !== 'Deleted video');
+
+              if (videos.length > 0) {
+                playlistContext = {
+                  playlistId,
+                  videos,
+                };
+              }
+            }
+          } catch {}
+        }
+      }
+
+      let videoId = detected.type === 'youtube' ? (detected.id || extractVideoId(rawInput)) : extractVideoId(rawInput);
+      if (!videoId && playlistContext && playlistContext.videos.length > 0) {
+        videoId = playlistContext.videos[0].videoId;
+      }
 
       if (!videoId) {
         res.status(400).json({ error: 'Unrecognized media URL or transcript. Provide a YouTube, Vimeo, Dailymotion, TED Talk, Podcast RSS link, direct audio/video file, or pasted transcript.' });
@@ -582,7 +625,7 @@ async function startServer() {
       }
 
       // Branch B: Valid YouTube Video ID
-      const oembed = await fetchVideoOEmbed(videoId, clientYoutubeKey, req);
+      const oembed = await fetchVideoOEmbed(videoId, activeYoutubeKey, req);
 
       // 1. Instant check for curated sample transcripts
       let segments: ParsedSegment[] | null = SAMPLE_FALLBACK_TRANSCRIPTS[videoId] || null;
@@ -593,7 +636,7 @@ async function startServer() {
           title: oembed.title,
           authorName: oembed.authorName,
           description: oembed.description,
-          youtubeApiKey: clientYoutubeKey,
+          youtubeApiKey: activeYoutubeKey,
           cookies: clientCookies,
         });
       }
@@ -625,6 +668,8 @@ async function startServer() {
             definition: oembedAny.definition,
             hasCaptions: oembedAny.hasCaptions,
             channelId: oembedAny.channelId,
+            playlistId: playlistContext?.playlistId,
+            playlistVideos: playlistContext?.videos,
             durationSeconds: Math.round(contentDuration),
             durationFormatted: formatTime(contentDuration),
             totalSegments: 0,
@@ -662,6 +707,8 @@ async function startServer() {
           definition: oembedAny.definition,
           hasCaptions: oembedAny.hasCaptions,
           channelId: oembedAny.channelId,
+          playlistId: playlistContext?.playlistId,
+          playlistVideos: playlistContext?.videos,
           durationSeconds: resolvedDuration,
           durationFormatted: formatTime(resolvedDuration),
           totalSegments: segments.length,
