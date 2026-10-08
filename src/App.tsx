@@ -29,6 +29,7 @@ import {
   subscribeToUserLists,
   subscribeToSavedSummaries,
   subscribeToCustomResources,
+  subscribeToActivityHistory,
   saveSummaryToFirestore,
   syncLocalDataToFirestore,
   recordUserActivity,
@@ -155,10 +156,14 @@ export default function App() {
       const unsubResources = subscribeToCustomResources(currentUser.uid, (resources) => {
         setCustomResources(resources);
       });
+      const unsubHistory = subscribeToActivityHistory(currentUser.uid, () => {
+        // Keeps activity history connection live and active in real-time
+      });
       return () => {
         unsubLists();
         unsubSummaries();
         unsubResources();
+        unsubHistory();
       };
     } else {
       setUserLists(loadLocalLists());
@@ -584,6 +589,21 @@ export default function App() {
         videoTitle: transcriptData.metadata?.title || '',
       }).catch(() => {});
 
+      if (transcriptData.fullText) {
+        getOrCreateTargetList().then((targetList) => {
+          if (targetList) {
+            addItemToUserList(targetList.id, {
+              itemType: 'video',
+              title: transcriptData.metadata?.title || 'YouTube Video',
+              url: urlToFetch,
+              subtitle: transcriptData.metadata?.authorName || 'YouTube Channel',
+              content: transcriptData.fullText || '',
+              notes: `Imported full transcript (${(transcriptData.segments || []).length} timestamped segments).`,
+            }).catch(() => {});
+          }
+        }).catch(() => {});
+      }
+
       if (savedMarkdown && savedMarkdown.trim()) {
         setSummary({
           markdown: savedMarkdown,
@@ -732,6 +752,15 @@ export default function App() {
       }
 
       setSummary(result);
+      saveSummaryToFirestore({
+        videoId: extractVideoId(url) || metadata?.videoId || '',
+        videoUrl: url || metadata?.url || '',
+        videoTitle: title || metadata?.title || 'YouTube Video Summary',
+        authorName: metadata?.authorName || 'YouTube Channel',
+        summaryType: type,
+        markdown: finalMarkdown,
+      }).catch((err) => console.warn('Real-time Firestore auto-save summary error:', err));
+
       recordUserActivity({
         actionType: 'summary',
         title: `Summary Generated: ${title}`,
@@ -747,7 +776,7 @@ export default function App() {
       setErrorMessage(e?.message || 'Summarization failed. Showing local extractive summary.');
       const fallbackMd = buildLocalSummaryFallback(textToSummarize, title, currentSegments);
       const preservedResearch = appendedResearchRef.current;
-      setSummary({
+      const fallbackResult: SummaryResult = {
         markdown: preservedResearch ? `${fallbackMd}\n\n${preservedResearch}` : fallbackMd,
         modelUsed: 'extractive-fallback',
         providerUsed: 'local-extractive',
@@ -757,7 +786,16 @@ export default function App() {
         isTruncated: false,
         continuationCount: 0,
         createdAt: new Date().toISOString(),
-      });
+      };
+      setSummary(fallbackResult);
+      saveSummaryToFirestore({
+        videoId: extractVideoId(url) || metadata?.videoId || '',
+        videoUrl: url || metadata?.url || '',
+        videoTitle: title || metadata?.title || 'YouTube Video Summary',
+        authorName: metadata?.authorName || 'YouTube Channel',
+        summaryType: type,
+        markdown: fallbackResult.markdown,
+      }).catch((err) => console.warn('Real-time Firestore auto-save fallback summary error:', err));
     } finally {
       if (summarizeAbortRef.current === controller) {
         setIsSummarizing(false);
@@ -845,20 +883,34 @@ export default function App() {
         throw new Error(data.error || 'Failed to continue summary.');
       }
 
+      const updatedFullMd = data.fullMarkdown || '';
       setSummary({
         ...summary,
-        markdown: data.fullMarkdown,
+        markdown: updatedFullMd,
         isTruncated: data.isTruncated,
         finishReason: data.finishReason,
         continuationCount: data.continuationCount,
         lastContinuationText: data.continuation,
       });
+      autoSaveSummaryMarkdown(updatedFullMd);
     } catch (e: any) {
       console.warn('Continue summary error:', e);
       setErrorMessage(e?.message || 'Could not continue summary.');
     } finally {
       setIsContinuing(false);
     }
+  };
+
+  const autoSaveSummaryMarkdown = (updatedMarkdown: string) => {
+    if (!updatedMarkdown?.trim()) return;
+    saveSummaryToFirestore({
+      videoId: metadata?.videoId || '',
+      videoUrl: currentUrl || metadata?.url || '',
+      videoTitle: metadata?.title || 'YouTube Video Summary',
+      authorName: metadata?.authorName || 'YouTube Channel',
+      summaryType: summary?.summaryType || summaryType,
+      markdown: updatedMarkdown,
+    }).catch((err) => console.warn('Real-time Firestore auto-save failed:', err));
   };
 
   const recordAppendedSnippet = (prevMd: string, nextMd: string) => {
@@ -876,6 +928,7 @@ export default function App() {
     const updatedMarkdown = appendWebResultToSummary(summary.markdown, result);
     recordAppendedSnippet(summary.markdown, updatedMarkdown);
     setSummary({ ...summary, markdown: updatedMarkdown });
+    autoSaveSummaryMarkdown(updatedMarkdown);
     setAppendNotice(`Appended "${result.title}" to summary`);
     setTimeout(() => setAppendNotice(null), 3500);
   };
@@ -889,6 +942,7 @@ export default function App() {
     const updatedMarkdown = appendImageResultToSummary(summary.markdown, image);
     recordAppendedSnippet(summary.markdown, updatedMarkdown);
     setSummary({ ...summary, markdown: updatedMarkdown });
+    autoSaveSummaryMarkdown(updatedMarkdown);
     setAppendNotice(`Appended "${image.title}" image to summary`);
     setTimeout(() => setAppendNotice(null), 3500);
   };
@@ -905,6 +959,7 @@ export default function App() {
     const updatedMarkdown = summary.markdown + citation;
     recordAppendedSnippet(summary.markdown, updatedMarkdown);
     setSummary({ ...summary, markdown: updatedMarkdown });
+    autoSaveSummaryMarkdown(updatedMarkdown);
     setAppendNotice(`Appended news article "${item.title.slice(0, 30)}..." to summary.`);
     setTimeout(() => setAppendNotice(null), 4000);
   };
@@ -922,6 +977,7 @@ export default function App() {
     const updatedMarkdown = summary.markdown + citation;
     recordAppendedSnippet(summary.markdown, updatedMarkdown);
     setSummary({ ...summary, markdown: updatedMarkdown });
+    autoSaveSummaryMarkdown(updatedMarkdown);
     setAppendNotice(`Appended book "${book.title.slice(0, 30)}..." to summary.`);
     setTimeout(() => setAppendNotice(null), 4000);
   };
@@ -940,6 +996,7 @@ export default function App() {
     const updatedMarkdown = summary.markdown + citation;
     recordAppendedSnippet(summary.markdown, updatedMarkdown);
     setSummary({ ...summary, markdown: updatedMarkdown });
+    autoSaveSummaryMarkdown(updatedMarkdown);
     setAppendNotice(`Appended paper "${paper.title.slice(0, 30)}..." to summary.`);
     setTimeout(() => setAppendNotice(null), 4000);
   };
@@ -953,6 +1010,7 @@ export default function App() {
     const updatedMarkdown = summary.markdown + snippet;
     recordAppendedSnippet(summary.markdown, updatedMarkdown);
     setSummary({ ...summary, markdown: updatedMarkdown });
+    autoSaveSummaryMarkdown(updatedMarkdown);
     setAppendNotice(noticeLabel || 'Appended resource to summary document.');
     setTimeout(() => setAppendNotice(null), 4000);
   };
@@ -998,6 +1056,7 @@ export default function App() {
     }
     recordAppendedSnippet(summary.markdown, updatedMarkdown);
     setSummary({ ...summary, markdown: updatedMarkdown });
+    autoSaveSummaryMarkdown(updatedMarkdown);
     setAppendNotice(
       `Appended research batch (${papers.length} papers, ${books.length} books, ${webResults.length} web, ${newsResults.length} news, ${images.length} figures)`
     );
@@ -1460,6 +1519,7 @@ export default function App() {
                 metadata={metadata}
                 segments={segments}
                 currentTheme={theme}
+                onSaveItemToList={handleSaveItemToList}
               />
             )}
 

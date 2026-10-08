@@ -5,6 +5,7 @@ import {
   Check,
   ExternalLink,
   Code2,
+  FolderOpen,
 } from 'lucide-react';
 import { VideoMetadata, ParsedSegment, WebSearchResult, ImageSearchResult, NewsSearchResult, YouTubeCommentItem, ThemeId } from '../types';
 import { APP_THEMES } from '../constants';
@@ -18,6 +19,14 @@ interface ScrapedDataViewerProps {
   imageResults?: ImageSearchResult[];
   newsResults?: NewsSearchResult[];
   currentTheme?: ThemeId;
+  onSaveItemToList?: (item: {
+    itemType: 'video' | 'summary' | 'book' | 'article' | 'note';
+    title: string;
+    url?: string;
+    subtitle?: string;
+    content?: string;
+    notes?: string;
+  }) => void;
 }
 
 export const ScrapedDataViewer: React.FC<ScrapedDataViewerProps> = ({
@@ -29,6 +38,7 @@ export const ScrapedDataViewer: React.FC<ScrapedDataViewerProps> = ({
   imageResults = [],
   newsResults = [],
   currentTheme = 'midnight',
+  onSaveItemToList,
 }) => {
   const themeConfig = APP_THEMES[currentTheme] || APP_THEMES.midnight;
 
@@ -215,6 +225,27 @@ export const ScrapedDataViewer: React.FC<ScrapedDataViewerProps> = ({
               <Download className="w-3 h-3" />
               <span>Save .json</span>
             </button>
+
+            {onSaveItemToList && (
+              <button
+                type="button"
+                onClick={() => {
+                  onSaveItemToList({
+                    itemType: 'video',
+                    title: metadata?.title || 'Scraped Video Data',
+                    url: videoUrl,
+                    subtitle: `${metadata?.authorName || 'Channel'} · ${segments.length} segments`,
+                    content: activeFormat === 'json' ? jsonString : activeFormat === 'vtt' ? vttText : activeFormat === 'srt' ? srtText : plainText,
+                    notes: `Scraped ${activeFormat.toUpperCase()} data saved to Firebase Artifacts.`,
+                  });
+                }}
+                className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded bg-amber-500/15 text-amber-400 hover:bg-amber-500/25 text-[11px] font-semibold cursor-pointer transition-colors whitespace-nowrap"
+                title="Save current scraped dataset directly to Firebase Artifacts"
+              >
+                <FolderOpen className="w-3 h-3" />
+                <span>+ Save to Firebase</span>
+              </button>
+            )}
           </div>
         </div>
 

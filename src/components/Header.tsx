@@ -235,12 +235,19 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               type="button"
               onClick={() => onSelectTab?.('lists')}
-              className="flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium rounded bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 transition-colors cursor-pointer whitespace-nowrap"
-              title={`Connected to Firebase as ${user.email || user.displayName}`}
+              className="flex items-center gap-1.5 px-2 py-0.5 text-[11px] font-medium rounded bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 border border-emerald-500/20 transition-colors cursor-pointer whitespace-nowrap"
+              title={`Real-Time Cloud Synced with Firebase as ${user.email || user.displayName}`}
             >
-              <Cloud className="w-3 h-3" />
-              <span className="hidden md:inline max-w-[110px] truncate">
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+              </span>
+              <Cloud className="w-3 h-3 text-emerald-400" />
+              <span className="hidden md:inline max-w-[110px] truncate font-semibold">
                 {user.displayName?.split(' ')[0] || user.email?.split('@')[0] || 'Synced'}
+              </span>
+              <span className="text-[9px] uppercase tracking-wider font-mono text-emerald-400/80 hidden lg:inline">
+                Realtime
               </span>
             </button>
             {onSignOut && (
