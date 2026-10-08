@@ -5222,6 +5222,44 @@ ${transcript.slice(0, 120000)}
             }
           } catch {}
         })(),
+
+        // 6. Wikimedia Commons Open Audio & Spoken Archives API
+        (async () => {
+          if (page > 2) return;
+          try {
+            const wmUrl = `https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(
+              q + ' ogg'
+            )}&gsrnamespace=6&prop=imageinfo&iiprop=url|size|mime|duration&format=json`;
+            const wmRes = await fetch(wmUrl, {
+              signal: AbortSignal.timeout(4000),
+              headers: { 'User-Agent': 'OpenTranscriptAI/1.0' },
+            });
+            if (wmRes.ok) {
+              const wmData = (await wmRes.json()) as any;
+              const pages = Object.values(wmData.query?.pages || {}) as any[];
+              for (const p of pages.slice(0, 5)) {
+                const info = p.imageinfo?.[0];
+                if (!info || !info.url) continue;
+                const cleanTitle = String(p.title || '')
+                  .replace(/^File:/i, '')
+                  .replace(/\.ogg$/i, '')
+                  .replace(/_/g, ' ');
+                const durSec = Math.round(info.duration || 0);
+                const durStr = durSec > 0 ? `${Math.floor(durSec / 60)}:${String(durSec % 60).padStart(2, '0')}` : undefined;
+                items.push({
+                  id: `wm-${p.pageid || Math.random().toString(36).slice(2, 8)}`,
+                  title: `${cleanTitle} (Wikimedia Audio Archive)`,
+                  creator: 'Wikimedia Commons Archive',
+                  description: `Open-source audio recording and spoken archive preserved on Wikimedia Commons (${info.mime || 'audio/ogg'}).`,
+                  url: info.descriptionurl || `https://commons.wikimedia.org/wiki/File:${encodeURIComponent(p.title)}`,
+                  audioOrDownloadUrl: info.url,
+                  durationOrSize: durStr || 'Audio Archive',
+                  category: 'Wikimedia Commons Audio',
+                });
+              }
+            }
+          } catch {}
+        })(),
       ]);
 
       res.json({ ok: true, query: q, page, hasMore: items.length > 0, items });
@@ -6041,14 +6079,14 @@ Provide 4 to 6 takeaways and 8 to 14 terms.`;
 
     res.json({
       ok: true,
-      totalEngines: 70,
+      totalEngines: 72,
       configuredKeys,
       categories: {
         aiModels: ['Google Gemini', 'OpenRouter', 'OpenAI GPT-4o', 'Anthropic Claude 3.5', 'Groq LPU'],
         academic: ['OpenAlex', 'Semantic Scholar', 'arXiv', 'Crossref DOI', 'PubMed NCBI', 'Europe PMC', 'bioRxiv / medRxiv', 'DOAJ', 'CORE.ac.uk', 'DBLP CS', 'HAL Open Science'],
         codeAndAi: ['GitHub REST API', 'GitLab Public Projects', 'crates.io Rust', 'HuggingFace Models', 'HuggingFace Datasets', 'HuggingFace Spaces', 'npm Registry', 'PyPI Python Index'],
         community: ['StackOverflow v2.3', 'CrossValidated SE', 'CS StackExchange', 'MathOverflow', 'Reddit JSON API', 'DEV.to Articles', 'Hacker News Algolia', 'GitHub Discussions'],
-        mediaAndData: ['YouTube Data API v3', 'Apple iTunes Podcasts', 'Listen Notes Podcasts', 'CERN Zenodo Datasets', 'Internet Archive', 'Library of Congress', 'World Bank Open Data'],
+        mediaAndData: ['YouTube Data API v3', 'Apple iTunes Podcasts', 'Listen Notes Podcasts', 'CERN Zenodo Datasets', 'Internet Archive', 'Library of Congress', 'World Bank Open Data', 'Wikimedia Commons Audio'],
         booksAndWeb: ['Google Books', 'OpenLibrary', 'Project Gutenberg (Gutendex)', 'Internet Archive Texts', 'Google Custom Search', 'Tavily AI Search', 'Serper.dev', 'Brave Search', 'Exa Neural Search', 'Wikipedia', 'Wikidata', 'DuckDuckGo', 'Free Dictionary', 'Datamuse'],
         newsAndVisuals: ['Google News', 'NewsAPI.org', 'GNews.io', 'The Guardian', 'New York Times', 'Unsplash', 'Pexels', 'Pixabay', 'Openverse CC', 'Wikimedia Commons'],
         speechAndTranslation: ['Microsoft Edge Neural TTS (WordBoundary)', 'Gemini 2.5 Flash TTS', 'ElevenLabs TTS', 'DeepL Neural Translate', 'Google Neural Translate GTX'],

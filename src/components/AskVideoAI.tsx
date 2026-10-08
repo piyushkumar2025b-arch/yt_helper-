@@ -75,6 +75,25 @@ export const AskVideoAI: React.FC<AskVideoAIProps> = ({
 
   const themeConfig = APP_THEMES[currentTheme] || APP_THEMES.midnight;
 
+  const suggestedQuestions = React.useMemo(() => {
+    const cleanTitle = (videoTitle || '')
+      .replace(/\([^)]*\)|\[[^\]]*\]/g, '')
+      .split('|')[0]
+      .split(' - ')[0]
+      .trim();
+    if (!cleanTitle || cleanTitle === 'YouTube Video') {
+      return SUGGESTED_QUESTIONS;
+    }
+    return [
+      `What is the core message of "${cleanTitle}" in plain English?`,
+      `What are the most surprising insights or facts shared in this video?`,
+      `What actionable takeaways can I implement right away?`,
+      `Did the speaker share any memorable real-world examples or stories?`,
+      `Walk me through the key moments step by step with timestamps.`,
+      `What are the 5 biggest principles worth remembering from this talk?`,
+    ];
+  }, [videoTitle]);
+
   useEffect(() => {
     setMessages([]);
     setSpeakingIdx(null);
@@ -250,7 +269,7 @@ export const AskVideoAI: React.FC<AskVideoAIProps> = ({
           {messages.length === 0 ? 'Quick questions:' : 'Ask another question:'}
         </span>
         <div className="flex flex-wrap gap-1.5">
-          {SUGGESTED_QUESTIONS.map((q, i) => (
+          {suggestedQuestions.map((q, i) => (
             <button
               key={i}
               type="button"

@@ -59,6 +59,16 @@ export const TranscriptViewer: React.FC<TranscriptViewerProps> = ({
   const [speakingIdx, setSpeakingIdx] = useState<number>(-1);
   const [activeWordIndex, setActiveWordIndex] = useState<number>(-1);
   const [autoScroll, setAutoScroll] = useState<boolean>(speechService.getAutoScroll());
+  const [playbackSpeed, setPlaybackSpeed] = useState<number>(() => speechService.getRate());
+
+  const handleCyclePlaybackSpeed = () => {
+    const SPEEDS = [1.0, 1.25, 1.5, 2.0, 0.75];
+    const current = speechService.getRate();
+    const curIdx = SPEEDS.findIndex((s) => Math.abs(s - current) < 0.08);
+    const nextSpeed = SPEEDS[(curIdx + 1) % SPEEDS.length];
+    speechService.setRate(nextSpeed);
+    setPlaybackSpeed(nextSpeed);
+  };
 
   const exportRef = useRef<HTMLDivElement>(null);
   const segmentRefs = useRef<Record<number, HTMLElement | null>>({});
@@ -337,9 +347,23 @@ export const TranscriptViewer: React.FC<TranscriptViewerProps> = ({
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder={`Search ${segments.length.toLocaleString()} transcript lines or timestamps...`}
-            className="w-full pl-7 pr-2.5 py-1 text-[11px] rounded bg-slate-500/10 placeholder:opacity-40 focus:outline-none"
+            placeholder={`Search ${segments.length.toLocaleString()} lines or timestamps...`}
+            className="w-full pl-7 pr-12 py-1 text-[11px] rounded bg-slate-500/10 placeholder:opacity-40 focus:outline-none"
           />
+          {searchQuery && (
+            <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-1">
+              <span className="text-[10px] font-mono px-1 rounded bg-indigo-500/20 text-indigo-300">
+                {filteredSegments.length}
+              </span>
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                className="opacity-50 hover:opacity-100 text-xs cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+          )}
         </div>
 
         <div className="flex items-center gap-1.5 flex-wrap">
@@ -354,6 +378,19 @@ export const TranscriptViewer: React.FC<TranscriptViewerProps> = ({
           >
             {isSpeaking && !isPaused ? <Pause className="w-3 h-3" /> : <Volume2 className="w-3 h-3" />}
             <span>{isSpeaking && !isPaused ? 'Pause' : 'Read Aloud'}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleCyclePlaybackSpeed}
+            className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[11px] font-mono font-semibold rounded transition-colors cursor-pointer whitespace-nowrap ${
+              playbackSpeed !== 1.0
+                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                : `${themeConfig.textSecondary} hover:${themeConfig.textPrimary} bg-slate-500/10`
+            }`}
+            title="Cycle speech playback speed (0.75x, 1x, 1.25x, 1.5x, 2x)"
+          >
+            <span>{playbackSpeed}x</span>
           </button>
 
           <button

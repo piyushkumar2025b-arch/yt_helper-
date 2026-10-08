@@ -1300,7 +1300,7 @@ export const ResearchVisualsPanel: React.FC<ResearchVisualsPanelProps> = ({
             <section className="space-y-5">
               <div className="flex items-center justify-between">
                 <h3 className={`text-sm font-semibold ${themeConfig.textPrimary}`}>
-                  01. Peer-Reviewed Papers &amp; Preprints (OpenAlex · Semantic Scholar · arXiv · Crossref · PubMed · Europe PMC · DOAJ · DBLP · HAL)
+                  01. Peer-Reviewed Papers &amp; Preprints (OpenAlex · Semantic Scholar · arXiv · Crossref · PubMed · Europe PMC · bioRxiv / medRxiv · DOAJ · DBLP · HAL)
                 </h3>
                 <span className={`text-xs ${themeConfig.textMuted} tabular-nums`}>
                   {academicResults.length} papers loaded
@@ -1423,7 +1423,7 @@ export const ResearchVisualsPanel: React.FC<ResearchVisualsPanelProps> = ({
             <section className="space-y-5">
               <div className="flex items-center justify-between">
                 <h3 className={`text-sm font-semibold ${themeConfig.textPrimary}`}>
-                  02. Open-Source Code, AI Models, Spaces &amp; Packages (GitHub · HuggingFace Models, Datasets &amp; Spaces · PyPI · npm)
+                  02. Open-Source Code, AI Models, Spaces &amp; Packages (GitHub · GitLab · crates.io · HuggingFace Models, Datasets &amp; Spaces · PyPI · npm)
                 </h3>
                 <span className={`text-xs ${themeConfig.textMuted} tabular-nums`}>
                   {codeResults.length} repositories &amp; models loaded
@@ -1521,7 +1521,7 @@ export const ResearchVisualsPanel: React.FC<ResearchVisualsPanelProps> = ({
             <section className="space-y-5">
               <div className="flex items-center justify-between">
                 <h3 className={`text-sm font-semibold ${themeConfig.textPrimary}`}>
-                  03. Technical Q&amp;A &amp; Community Threads (StackOverflow · CrossValidated SE · Reddit · DEV.to · Hacker News · GitHub Discussions)
+                  03. Technical Q&amp;A &amp; Community Threads (StackOverflow · CS StackExchange · MathOverflow · CrossValidated SE · Reddit · DEV.to · Hacker News · GitHub Discussions)
                 </h3>
                 <span className={`text-xs ${themeConfig.textMuted} tabular-nums`}>
                   {discussionResults.length} discussions loaded
@@ -1601,7 +1601,7 @@ export const ResearchVisualsPanel: React.FC<ResearchVisualsPanelProps> = ({
             <section className="space-y-5">
               <div className="flex items-center justify-between">
                 <h3 className={`text-sm font-semibold ${themeConfig.textPrimary}`}>
-                  04. Podcasts, Scientific Datasets &amp; Archival Records (Apple Podcasts · CERN Zenodo · Internet Archive · Library of Congress)
+                  04. Podcasts, Scientific Datasets &amp; Archival Records (Apple Podcasts · CERN Zenodo · Internet Archive · Library of Congress · World Bank · Wikimedia Commons)
                 </h3>
                 <span className={`text-xs ${themeConfig.textMuted} tabular-nums`}>
                   {podcastResults.length} items loaded

@@ -1169,7 +1169,7 @@ export const CrucialKnowledgePanel: React.FC<CrucialKnowledgePanelProps> = ({
                           <span className={`${themeConfig.textMuted} text-[10px] font-semibold uppercase tracking-wider`}>
                             Sources:
                           </span>
-                          {sources.slice(0, 4).map((src) => (
+                          {sources.slice(0, 8).map((src) => (
                             <a
                               key={src.label}
                               href={src.url}

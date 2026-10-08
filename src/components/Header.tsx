@@ -29,6 +29,7 @@ interface HeaderProps {
   onQuickSaveToCloud?: () => void;
   onOpenYouTubeSettings?: () => void;
   hasYouTubeKey?: boolean;
+  onOpenShortcuts?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
